@@ -29,19 +29,19 @@ class Builder(object):
             delete_dir_if_exists(dir_path)
 
     def init_go_env(self):
+        # Vupen: если go.mod уже существует (commit'ом зафиксирован — нам нужны там
+        # директивы `replace github.com/xtls/xray-core => github.com/BobJustFry/xray-core`),
+        # пересоздавать его НЕЛЬЗЯ. Иначе reset убьёт replace и сборка соберёт
+        # upstream-ядро без TUN-inbound. Только `go mod tidy` для актуализации go.sum.
         os.chdir(self.lib_dir)
-        self.clean_lib_files(["go.mod", "go.sum"])
-        ret = subprocess.run(["go", "mod", "init", LIBXRAY_MOD_NAME])
-        if ret.returncode != 0:
-            raise Exception("go mod init failed")
+        gomod_path = os.path.join(self.lib_dir, "go.mod")
+        if not os.path.isfile(gomod_path):
+            self.clean_lib_files(["go.mod", "go.sum"])
+            ret = subprocess.run(["go", "mod", "init", LIBXRAY_MOD_NAME])
+            if ret.returncode != 0:
+                raise Exception("go mod init failed")
 
-        ret = subprocess.run(
-            [
-                "go",
-                "mod",
-                "tidy",
-            ]
-        )
+        ret = subprocess.run(["go", "mod", "tidy"])
         if ret.returncode != 0:
             raise Exception("go mod tidy failed")
 
@@ -149,18 +149,11 @@ class Builder(object):
             raise Exception(f"build_desktop_bin failed")
 
     def revert_go_env(self):
+        # Vupen: оригинальный revert пересоздавал go.mod (clean+init+tidy), уничтожая
+        # `replace github.com/xtls/xray-core => github.com/BobJustFry/xray-core`. У нас
+        # go.mod — артефакт коммита (с явной replace директивой), а не временный файл,
+        # поэтому revert делает только `go mod tidy` для актуализации go.sum.
         os.chdir(self.lib_dir)
-        self.clean_lib_files(["go.mod", "go.sum"])
-        ret = subprocess.run(["go", "mod", "init", LIBXRAY_MOD_NAME])
-        if ret.returncode != 0:
-            raise Exception("go mod init failed")
-
-        ret = subprocess.run(
-            [
-                "go",
-                "mod",
-                "tidy",
-            ]
-        )
+        ret = subprocess.run(["go", "mod", "tidy"])
         if ret.returncode != 0:
             raise Exception("go mod tidy failed")

@@ -52,13 +52,14 @@ func SetTunFd(fd int32) {
 	os.Setenv(platform.TunFdKey, strconv.Itoa(int(fd)))
 }
 
+// Vupen: remnawave/xray-core (наш форк BobJustFry/xray-core) выпилил отдельный
+// MPH-кэш домен-матчера (#5924/#5935 — runtime-эффективный matcher вместо file cache).
+// Параметр mphCachePath сохранён в сигнатуре для обратной совместимости с вызовами
+// из Swift-моста (SwiftyXrayKit) и Java/Kotlin/Dart, но больше не используется.
 func InitEnv(datDir string, mphCachePath string) {
+	_ = mphCachePath
 	os.Setenv(platform.AssetLocation, datDir)
 	os.Setenv(platform.CertLocation, datDir)
-
-	if mphCachePath != "" {
-		os.Setenv(platform.MphCachePath, mphCachePath)
-	}
 }
 
 // Run Xray instance.
@@ -119,23 +120,22 @@ func XrayVersion() string {
 	return core.Version()
 }
 
-// https://github.com/XTLS/Xray-core/blob/main/main/commands/all/buildmphcache.go
+// Vupen: BuildMphCache — stub-замена. В remnawave/xray-core MPH-кэш как отдельный артефакт
+// удалён (#5924/#5935 — встроенный compact matcher без отдельного prebuild). Функция оставлена,
+// чтобы не ломать публичный API libXray, но фактически выполняет только базовую валидацию
+// конфигурационного JSON через serial.DecodeJSONConfig.
 func BuildMphCache(datDir string, mphCachePath string, configPath string) error {
+	_ = mphCachePath
 	InitEnv(datDir, "")
 	cf, err := os.Open(configPath)
 	if err != nil {
 		base.Fatalf("failed to open config file: %v", err)
+		return err
 	}
 	defer cf.Close()
 
-	config, err := serial.DecodeJSONConfig(cf)
-	if err != nil {
+	if _, err := serial.DecodeJSONConfig(cf); err != nil {
 		base.Fatalf("failed to decode config file: %v", err)
-		return err
-	}
-
-	if err := config.BuildMPHCache(&mphCachePath); err != nil {
-		base.Fatalf("failed to build MPH cache: %v", err)
 		return err
 	}
 	return nil
