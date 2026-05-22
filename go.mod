@@ -53,7 +53,11 @@ require (
 )
 
 // Vupen: подменяем upstream XTLS/Xray-core на наш форк, основанный на remnawave/xray-core.
-// Pin на конкретный sha 3bc24a3d5d0fbdbec9f75d767d0d26a9340b14be (main HEAD remnawave/xray-core 2026-04-25).
-// В нём встроенный TUN inbound + расширенный sniffing + фикс IPIfNonMatch (#5979),
+// Pin на ветку vupen/sniff-timing-tuning (sha 2ea657801980ca12bdf9b181d7cd51518b3ac53b),
+// поверх base remnawave/xray-core main 3bc24a3 (2026-04-25). В этой ветке:
+//   - app/dispatcher/tuning_vupen.go: VupenSniffCacheDeadline=800ms (вместо хардкода 200ms)
+//   - app/dispatcher/default.go::sniffer: timing-инструментарий ([Vupen sniff] stage=...)
+//   - proxy/tun/handler.go::HandleConnection: [Vupen tun] dispatch_done elapsed_ms=...
+// В базе: встроенный TUN inbound + расширенный sniffing + фикс IPIfNonMatch (#5979),
 // которых нет в чистом XTLS/Xray-core. См. docs/LIBXRAY_MIGRATION_NOTES.md.
-replace github.com/xtls/xray-core => github.com/BobJustFry/xray-core v0.0.0-20260425212042-3bc24a3d5d0f
+replace github.com/xtls/xray-core => github.com/BobJustFry/xray-core v0.0.0-20260522203812-2ea657801980
