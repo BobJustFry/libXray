@@ -29,6 +29,8 @@
 package libXray
 
 import (
+	"fmt"
+	"runtime"
 	"runtime/debug"
 )
 
@@ -41,6 +43,26 @@ func SetMemoryLimitMB(mb int64) {
 		return
 	}
 	debug.SetMemoryLimit(mb * 1024 * 1024)
+}
+
+// ForceGC запускает сборку мусора Go и возвращает неиспользуемые страницы кучи ОС.
+// Вызывать после смены GOMEMLIMIT на лету (аналог Android Libv2ray ForceGC).
+func ForceGC() {
+	runtime.GC()
+	debug.FreeOSMemory()
+}
+
+// GoMemoryDiag — heap_alloc / heap_sys / stack (МБ) для журнала NE.
+func GoMemoryDiag() string {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	const mb = 1024.0 * 1024.0
+	return fmt.Sprintf(
+		"heap_alloc=%.1fMB heap_sys=%.1fMB stack=%.1fMB",
+		float64(ms.HeapAlloc)/mb,
+		float64(ms.HeapSys)/mb,
+		float64(ms.StackInuse)/mb,
+	)
 }
 
 // SetTCPBufMaxKB — ЗАГЛУШКА. Раньше (в форке dima-u/libXray-apple) задавала
