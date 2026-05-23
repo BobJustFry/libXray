@@ -105,6 +105,7 @@ func GetXrayState() bool {
 
 // Stop Xray instance.
 func StopXray() error {
+	memory.StopForceFree()
 	if coreServer != nil {
 		err := coreServer.Close()
 		coreServer = nil

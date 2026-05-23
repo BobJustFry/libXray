@@ -3,3 +3,5 @@
 package memory
 
 func InitForceFree() {}
+
+func StopForceFree() {}
