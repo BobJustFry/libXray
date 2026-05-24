@@ -10,6 +10,7 @@ import (
 
 	"github.com/xtls/libxray/memory"
 	"github.com/xtls/xray-core/proxy/tun"
+	grpctransport "github.com/xtls/xray-core/transport/internet/grpc"
 )
 
 // SetMemoryLimitMB задаёт soft-limit Go-heap в МБ через `runtime/debug`.
@@ -56,4 +57,14 @@ func SetTCPMaxInFlight(n int32) {
 // SetMaxUDPConns — лимит одновременных UDP-сессий в TUN.
 func SetMaxUDPConns(n int32) {
 	tun.SetMaxUDPConns(int(n))
+}
+
+// ResetGrpcTransportPool — закрыть кэш gRPC upstream (recovery после смены net path).
+func ResetGrpcTransportPool() int32 {
+	return int32(grpctransport.ResetTransportPool())
+}
+
+// GrpcTransportPoolSize — число закэшированных gRPC ClientConn (диагностика NE).
+func GrpcTransportPoolSize() int32 {
+	return int32(grpctransport.TransportPoolSize())
 }

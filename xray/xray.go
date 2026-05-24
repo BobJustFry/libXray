@@ -8,6 +8,7 @@ import (
 	"github.com/xtls/libxray/memory"
 	"github.com/xtls/xray-core/common/cmdarg"
 	"github.com/xtls/xray-core/proxy/tun"
+	grpctransport "github.com/xtls/xray-core/transport/internet/grpc"
 	"github.com/xtls/xray-core/common/platform"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/infra/conf/serial"
@@ -125,11 +126,24 @@ func StopXray() error {
 	if coreServer != nil {
 		err := coreServer.Close()
 		coreServer = nil
+		grpctransport.ResetTransportPool()
 		if err != nil {
 			return err
 		}
+	} else {
+		grpctransport.ResetTransportPool()
 	}
 	return nil
+}
+
+// ResetGrpcTransportPool closes cached gRPC upstream connections (iOS net-path recovery).
+func ResetGrpcTransportPool() int {
+	return grpctransport.ResetTransportPool()
+}
+
+// GrpcTransportPoolSize returns cached gRPC client count (diagnostics).
+func GrpcTransportPoolSize() int {
+	return grpctransport.TransportPoolSize()
 }
 
 // Xray's version
