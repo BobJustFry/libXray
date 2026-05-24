@@ -7,6 +7,7 @@ import (
 
 	"github.com/xtls/libxray/memory"
 	"github.com/xtls/xray-core/common/cmdarg"
+	"github.com/xtls/xray-core/proxy/tun"
 	"github.com/xtls/xray-core/common/platform"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/infra/conf/serial"
@@ -50,6 +51,21 @@ func StartXrayFromJSON(configJSON string) (*core.Instance, error) {
 // Call this BEFORE RunXray/RunXrayFromJSON.
 func SetTunFd(fd int32) {
 	os.Setenv(platform.TunFdKey, strconv.Itoa(int(fd)))
+}
+
+// SetTCPBufMaxKB sets max TCP RX/TX buffer per connection (KB). Call before RunXray.
+func SetTCPBufMaxKB(kb int) {
+	tun.SetTCPBufMaxKB(kb)
+}
+
+// SetTCPMaxInFlight sets max concurrent TCP connections in gVisor TUN.
+func SetTCPMaxInFlight(n int) {
+	tun.SetTCPMaxInFlight(n)
+}
+
+// SetMaxUDPConns sets max concurrent UDP sessions in TUN.
+func SetMaxUDPConns(n int) {
+	tun.SetMaxUDPConns(n)
 }
 
 // Vupen: remnawave/xray-core (наш форк BobJustFry/xray-core) выпилил отдельный

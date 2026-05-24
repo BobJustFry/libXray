@@ -60,4 +60,4 @@ require (
 //   - proxy/tun/handler.go::HandleConnection: [Vupen tun] dispatch_done elapsed_ms=...
 // В базе: встроенный TUN inbound + расширенный sniffing + фикс IPIfNonMatch (#5979),
 // которых нет в чистом XTLS/Xray-core. См. docs/LIBXRAY_MIGRATION_NOTES.md.
-replace github.com/xtls/xray-core => github.com/BobJustFry/xray-core v0.0.0-20260522210537-ce284fcfaed8
+replace github.com/xtls/xray-core => ../xray-core
