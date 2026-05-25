@@ -127,6 +127,7 @@ func StopXray() error {
 		err := coreServer.Close()
 		coreServer = nil
 		grpctransport.ResetTransportPool()
+		debug.FreeOSMemory()
 		if err != nil {
 			return err
 		}

@@ -55,6 +55,12 @@ func CGoReadGeoFiles(base64Text *C.char) *C.char {
 	return C.CString(ReadGeoFiles(text))
 }
 
+//export CGoPingTaggedOutbound
+func CGoPingTaggedOutbound(base64Text *C.char) *C.char {
+	text := C.GoString(base64Text)
+	return C.CString(PingTaggedOutbound(text))
+}
+
 //export CGoPing
 func CGoPing(base64Text *C.char) *C.char {
 	text := C.GoString(base64Text)

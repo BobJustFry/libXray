@@ -65,6 +65,28 @@ type pingRequest struct {
 	Proxy      string `json:"proxy,omitempty"`
 }
 
+type pingTaggedRequest struct {
+	Timeout     int    `json:"timeout,omitempty"`
+	Url         string `json:"url,omitempty"`
+	OutboundTag string `json:"outboundTag,omitempty"`
+}
+
+// PingTaggedOutbound measures delay via running Xray + forced outbound tag.
+func PingTaggedOutbound(base64Text string) string {
+	var response nodep.CallResponse[int64]
+	req, err := base64.StdEncoding.DecodeString(base64Text)
+	if err != nil {
+		return response.EncodeToBase64(nodep.PingDelayError, err)
+	}
+	var request pingTaggedRequest
+	err = json.Unmarshal(req, &request)
+	if err != nil {
+		return response.EncodeToBase64(nodep.PingDelayError, err)
+	}
+	delay, err := xray.PingTaggedOutbound(request.Timeout, request.Url, request.OutboundTag)
+	return response.EncodeToBase64(delay, err)
+}
+
 // Ping Xray config and get the delay of its outbound.
 func Ping(base64Text string) string {
 	var response nodep.CallResponse[int64]
