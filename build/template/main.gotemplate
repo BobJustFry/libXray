@@ -73,6 +73,12 @@ func CGoQueryStats(base64Text *C.char) *C.char {
 	return C.CString(QueryStats(text))
 }
 
+//export CGoQueryOutboundTraffic
+func CGoQueryOutboundTraffic(base64Text *C.char) *C.char {
+	text := C.GoString(base64Text)
+	return C.CString(QueryOutboundTraffic(text))
+}
+
 //export CGoTestXray
 func CGoTestXray(base64Text *C.char) *C.char {
 	text := C.GoString(base64Text)

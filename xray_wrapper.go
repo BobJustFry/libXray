@@ -118,6 +118,23 @@ func QueryStats(base64Text string) string {
 	return response.EncodeToBase64(stats, nil)
 }
 
+type outboundTrafficBody struct {
+	Uplink   int64 `json:"uplink"`
+	Downlink int64 `json:"downlink"`
+}
+
+// QueryOutboundTraffic reads and resets uplink/downlink for outbound [tag] (base64 tag string).
+func QueryOutboundTraffic(base64Tag string) string {
+	var response nodep.CallResponse[*outboundTrafficBody]
+	tagBytes, err := base64.StdEncoding.DecodeString(base64Tag)
+	if err != nil {
+		return response.EncodeToBase64(nil, err)
+	}
+	tag := string(tagBytes)
+	u, d := xray.QueryOutboundTrafficDelta(tag)
+	return response.EncodeToBase64(&outboundTrafficBody{Uplink: u, Downlink: d}, nil)
+}
+
 // Test Xray Config.
 func TestXray(base64Text string) string {
 	var response nodep.CallResponse[string]
