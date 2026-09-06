@@ -5,8 +5,10 @@ package libXray
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"runtime/debug"
+	"runtime/pprof"
 
 	"github.com/xtls/libxray/memory"
 	"github.com/xtls/xray-core/proxy/tun"
@@ -31,17 +33,40 @@ func ForceGC() {
 	debug.FreeOSMemory()
 }
 
-// GoMemoryDiag — heap_alloc / heap_sys / stack (МБ) для журнала NE.
+// GoMemoryDiag — память Go для журнала NE. `heap_alloc` первым: парсеры логов
+// ищут его по префиксу. `go_limit_use` = Sys − HeapReleased — то, с чем сравнивает
+// себя GOMEMLIMIT. `heap_sys` сам по себе не убывает (= inuse + idle), по нему нельзя
+// судить, отдана ли память системе — для этого `heap_released`.
 func GoMemoryDiag() string {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	const mb = 1024.0 * 1024.0
 	return fmt.Sprintf(
-		"heap_alloc=%.1fMB heap_sys=%.1fMB stack=%.1fMB",
+		"heap_alloc=%.1fMB heap_sys=%.1fMB stack=%.1fMB heap_idle=%.1fMB heap_released=%.1fMB sys=%.1fMB go_limit_use=%.1fMB goroutines=%d",
 		float64(ms.HeapAlloc)/mb,
 		float64(ms.HeapSys)/mb,
 		float64(ms.StackInuse)/mb,
+		float64(ms.HeapIdle)/mb,
+		float64(ms.HeapReleased)/mb,
+		float64(ms.Sys)/mb,
+		float64(ms.Sys-ms.HeapReleased)/mb,
+		runtime.NumGoroutine(),
 	)
+}
+
+// WriteHeapProfile — heap-профиль Go в текстовом виде (pprof debug=1: inuse/alloc по
+// стекам с именами функций) в файл. Возвращает "" при успехе или текст ошибки.
+// Текст читается без бинарника — это ответ на «кто держит память в NE», а не догадка.
+func WriteHeapProfile(path string) string {
+	f, err := os.Create(path)
+	if err != nil {
+		return err.Error()
+	}
+	defer f.Close()
+	if err := pprof.Lookup("heap").WriteTo(f, 1); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // SetTCPBufMaxKB — лимит RX/TX буфера TCP (gVisor), KB.
