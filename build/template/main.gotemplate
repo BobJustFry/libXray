@@ -121,3 +121,8 @@ func CGoSetMemoryLimitMB(mb C.longlong) {
 func CGoForceGC() {
 	ForceGC()
 }
+
+//export CGoWriteHeapProfile
+func CGoWriteHeapProfile(path *C.char) *C.char {
+	return C.CString(WriteHeapProfile(C.GoString(path)))
+}
