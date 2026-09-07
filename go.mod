@@ -62,3 +62,5 @@ require (
 // Pin: ветка vupen/full-26.7.28 (база XTLS v26.7.28 + Vupen sniff/TUN/gRPC).
 // См. docs/VENDOR_SUBMODULES.md, docs/LIBXRAY_MIGRATION_NOTES.md.
 replace github.com/xtls/xray-core => ../xray-core
+
+replace golang.org/x/net => ../xray-core/vupen/x-net
