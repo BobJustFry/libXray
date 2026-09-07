@@ -27,6 +27,11 @@ func VupenCoreInfo() string {
 	return fmt.Sprintf("tag=%s xnet.scratchMaxKB=%d", vupenCoreTag, http2.VupenRequestBodyScratchMax>>10)
 }
 
+// VupenCoreTag — только тег, для строки версии ядра в приложении: «26.7.28 (vupen <тег>)».
+func VupenCoreTag() string {
+	return vupenCoreTag
+}
+
 // SetMemoryLimitMB задаёт soft-limit Go-heap в МБ через `runtime/debug`.
 func SetMemoryLimitMB(mb int64) {
 	if mb <= 0 {
