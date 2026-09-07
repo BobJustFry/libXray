@@ -13,7 +13,19 @@ import (
 	"github.com/xtls/libxray/memory"
 	"github.com/xtls/xray-core/proxy/tun"
 	grpctransport "github.com/xtls/xray-core/transport/internet/grpc"
+	"golang.org/x/net/http2"
 )
+
+// vupenCoreTag — поднимать при каждой правке ядра/libXray, которую надо узнавать по логу.
+const vupenCoreTag = "20260907-xnet-scratch-64k"
+
+// VupenCoreInfo — строка для лога NE при старте туннеля: тег сборки и фактический
+// потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
+// http2.VupenRequestBodyScratchMax намеренная: со стоковым x/net этого символа нет,
+// и сборка падает вместо того, чтобы молча уехать со старым ядром (так вышло с 580).
+func VupenCoreInfo() string {
+	return fmt.Sprintf("tag=%s xnet.scratchMaxKB=%d", vupenCoreTag, http2.VupenRequestBodyScratchMax>>10)
+}
 
 // SetMemoryLimitMB задаёт soft-limit Go-heap в МБ через `runtime/debug`.
 func SetMemoryLimitMB(mb int64) {
