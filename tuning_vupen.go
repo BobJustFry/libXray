@@ -16,20 +16,24 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// vupenCoreTag — поднимать при каждой правке ядра/libXray, которую надо узнавать по логу.
-const vupenCoreTag = "20260907-xnet-scratch-64k"
+// vupenCoreBuild — BUILD ядра, как у приложения: +1 на каждый коммит в форке xray-core
+// или в libXray, который меняет то, что уезжает в бинарник. Считается с момента, когда
+// ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
+// 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
+// Правило — docs/VERSIONING.md, раздел «Ядро».
+const vupenCoreBuild = 46
 
-// VupenCoreInfo — строка для лога NE при старте туннеля: тег сборки и фактический
+// VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
 // http2.VupenRequestBodyScratchMax намеренная: со стоковым x/net этого символа нет,
 // и сборка падает вместо того, чтобы молча уехать со старым ядром (так вышло с 580).
 func VupenCoreInfo() string {
-	return fmt.Sprintf("tag=%s xnet.scratchMaxKB=%d", vupenCoreTag, http2.VupenRequestBodyScratchMax>>10)
+	return fmt.Sprintf("build=%d xnet.scratchMaxKB=%d", vupenCoreBuild, http2.VupenRequestBodyScratchMax>>10)
 }
 
-// VupenCoreTag — только тег, для строки версии ядра в приложении: «26.7.28 (vupen <тег>)».
-func VupenCoreTag() string {
-	return vupenCoreTag
+// VupenCoreBuild — только номер, для строки версии ядра в приложении: «26.7.28 (vupen 46)».
+func VupenCoreBuild() string {
+	return fmt.Sprintf("%d", vupenCoreBuild)
 }
 
 // SetMemoryLimitMB задаёт soft-limit Go-heap в МБ через `runtime/debug`.
