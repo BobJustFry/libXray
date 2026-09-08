@@ -21,7 +21,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 46
+const vupenCoreBuild = 47
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -88,6 +88,13 @@ func WriteHeapProfile(path string) string {
 		return err.Error()
 	}
 	return ""
+}
+
+// TunStats — счётчики тракта TUN (proxy/tun/tuning_stats.go) для heartbeat NE:
+// жив ли цикл чтения, пакеты в обе стороны, SYN, отброшенные gVisor по maxInFlight,
+// UDP-сессии и сбросы по их лимиту.
+func TunStats() string {
+	return tun.Stats()
 }
 
 // SetTCPBufMaxKB — лимит RX/TX буфера TCP (gVisor), KB.
