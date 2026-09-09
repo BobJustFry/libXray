@@ -11,6 +11,7 @@ import (
 	"runtime/pprof"
 
 	"github.com/xtls/libxray/memory"
+	"github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/proxy/tun"
 	grpctransport "github.com/xtls/xray-core/transport/internet/grpc"
 	"golang.org/x/net/http2"
@@ -21,7 +22,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 49
+const vupenCoreBuild = 50
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -94,7 +95,8 @@ func WriteHeapProfile(path string) string {
 // жив ли цикл чтения, пакеты в обе стороны, SYN, отброшенные gVisor по maxInFlight,
 // UDP-сессии и сбросы по их лимиту.
 func TunStats() string {
-	return tun.Stats()
+	// sniff[...] — исходы sniff в dispatcher (ядро 50): p1ok / p2ok / timeout / early.
+	return tun.Stats() + " sniff[" + dispatcher.VupenSniffStats() + "]"
 }
 
 // SetTCPBufMaxKB — лимит RX/TX буфера TCP (gVisor), KB.
