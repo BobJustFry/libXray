@@ -67,13 +67,14 @@ func TestClashHysteria2_WithBandwidthPortHoppingSalamander(t *testing.T) {
 	assert.Equal(t, conf.Bandwidth("100 mbps"), qp.BrutalUp)
 	assert.Equal(t, conf.Bandwidth("200 mbps"), qp.BrutalDown)
 
-	// UdpHop
-	assert.Equal(t, "20000-40000", qp.UdpHop.PortList.String())
-	assert.Equal(t, int32(30), qp.UdpHop.Interval.From)
-	assert.Equal(t, int32(30), qp.UdpHop.Interval.To)
+	// UdpHop (UDP mask "udphop" since Xray-core v26.9.9)
+	hop := requireUDPHopMask(t, ss.FinalMask.Udp)
+	assert.Equal(t, "20000-40000", hop.RemotePorts.String())
+	assert.Equal(t, int32(30), hop.Interval.From)
+	assert.Equal(t, int32(30), hop.Interval.To)
 
 	// Salamander
-	require.Len(t, ss.FinalMask.Udp, 1)
+	require.Len(t, ss.FinalMask.Udp, 2)
 	assert.Equal(t, "salamander", ss.FinalMask.Udp[0].Type)
 	var salamander conf.Salamander
 	require.NoError(t, json.Unmarshal(*ss.FinalMask.Udp[0].Settings, &salamander))
@@ -106,11 +107,9 @@ func TestClashHysteria2_BandwidthOnly(t *testing.T) {
 	assert.Equal(t, conf.Bandwidth("50 mbps"), qp.BrutalUp)
 	assert.Equal(t, conf.Bandwidth("100 mbps"), qp.BrutalDown)
 
-	// No Salamander
-	assert.Empty(t, ss.FinalMask.Udp)
-
-	// No UdpHop
-	assert.Empty(t, qp.UdpHop.PortList.Range)
+	// No Salamander, no UdpHop
+	assert.Nil(t, findUDPMask(ss.FinalMask.Udp, "salamander"))
+	assert.Nil(t, findUDPMask(ss.FinalMask.Udp, "udphop"))
 }
 
 func TestClashHysteria2_SalamanderOnly(t *testing.T) {
