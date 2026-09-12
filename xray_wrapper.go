@@ -118,21 +118,17 @@ func QueryStats(base64Text string) string {
 	return response.EncodeToBase64(stats, nil)
 }
 
-type outboundTrafficBody struct {
+type trafficTotalsBody struct {
 	Uplink   int64 `json:"uplink"`
 	Downlink int64 `json:"downlink"`
 }
 
-// QueryOutboundTraffic reads and resets uplink/downlink for outbound [tag] (base64 tag string).
-func QueryOutboundTraffic(base64Tag string) string {
-	var response nodep.CallResponse[*outboundTrafficBody]
-	tagBytes, err := base64.StdEncoding.DecodeString(base64Tag)
-	if err != nil {
-		return response.EncodeToBase64(nil, err)
-	}
-	tag := string(tagBytes)
-	u, d := xray.QueryOutboundTrafficDelta(tag)
-	return response.EncodeToBase64(&outboundTrafficBody{Uplink: u, Downlink: d}, nil)
+// QueryTrafficTotals returns cumulative uplink/downlink of every non-service
+// outbound since this core instance started. Counters are not reset.
+func QueryTrafficTotals() string {
+	var response nodep.CallResponse[*trafficTotalsBody]
+	u, d := xray.QueryTrafficTotals()
+	return response.EncodeToBase64(&trafficTotalsBody{Uplink: u, Downlink: d}, nil)
 }
 
 // Test Xray Config.
