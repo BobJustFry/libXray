@@ -121,6 +121,24 @@ func CGoSetMemoryLimitMB(mb C.longlong) {
 	SetMemoryLimitMB(int64(mb))
 }
 
+// Лимиты TUN. На Apple их ставит Swift через gomobile; DLL до ядра 59 их не
+// экспортировала, и Windows молча жил бы с телефонными потолками
+// (128 UDP-сессий). Значения — до RunXray.
+//export CGoSetTCPBufMaxKB
+func CGoSetTCPBufMaxKB(kb C.int) {
+	SetTCPBufMaxKB(int32(kb))
+}
+
+//export CGoSetTCPMaxInFlight
+func CGoSetTCPMaxInFlight(n C.int) {
+	SetTCPMaxInFlight(int32(n))
+}
+
+//export CGoSetMaxUDPConns
+func CGoSetMaxUDPConns(n C.int) {
+	SetMaxUDPConns(int32(n))
+}
+
 //export CGoForceGC
 func CGoForceGC() {
 	ForceGC()
