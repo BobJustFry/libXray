@@ -100,6 +100,11 @@ func CGoXrayVersion() *C.char {
 	return C.CString(XrayVersion())
 }
 
+//export CGoVupenCoreBuild
+func CGoVupenCoreBuild() *C.char {
+	return C.CString(VupenCoreBuild())
+}
+
 //export CGoBuildMphCache
 func CGoBuildMphCache(base64Text *C.char) *C.char {
 	text := C.GoString(base64Text)
