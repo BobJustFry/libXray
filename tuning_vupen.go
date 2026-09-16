@@ -12,6 +12,7 @@ import (
 
 	"github.com/xtls/libxray/memory"
 	"github.com/xtls/xray-core/app/dispatcher"
+	"github.com/xtls/xray-core/app/observatory/burst"
 	"github.com/xtls/xray-core/proxy/tun"
 	grpctransport "github.com/xtls/xray-core/transport/internet/grpc"
 	"golang.org/x/net/http2"
@@ -22,7 +23,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 59
+const vupenCoreBuild = 60
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -35,6 +36,20 @@ func VupenCoreInfo() string {
 // VupenCoreBuild — только номер, для строки версии ядра в приложении: «26.7.28 (vupen 46)».
 func VupenCoreBuild() string {
 	return fmt.Sprintf("%d", vupenCoreBuild)
+}
+
+// VupenObservatoryPause — пробы балансировщика на паузу: устройство уснуло или
+// пропала сеть. Без этого каждый раунд во сне пишет каждому узлу провал, живущий
+// `interval × sampling × 2`, и после сна балансировщик считает мёртвыми все узлы
+// сразу (подробности — app/observatory/burst/tuning_vupen_sleep.go).
+func VupenObservatoryPause(reason string) {
+	burst.VupenObservatoryPause(reason)
+}
+
+// VupenObservatoryResume — проснулись или вернулась сеть: счётчики мёртвых узлов
+// сбрасываются, ближайшие секунды провалы не записываются, пачка проб уходит сразу.
+func VupenObservatoryResume(reason string) {
+	burst.VupenObservatoryResume(reason)
 }
 
 // SetMemoryLimitMB задаёт soft-limit Go-heap в МБ через `runtime/debug`.
