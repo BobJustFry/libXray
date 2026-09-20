@@ -23,7 +23,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 63
+const vupenCoreBuild = 64
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -50,6 +50,13 @@ func VupenObservatoryPause(reason string) {
 // сбрасываются, ближайшие секунды провалы не записываются, пачка проб уходит сразу.
 func VupenObservatoryResume(reason string) {
 	burst.VupenObservatoryResume(reason)
+}
+
+// VupenObservatoryNetworkChanged — путь сменился (wifi↔cellular, пропала или
+// вернулась сеть). Пробы, упавшие вместе со старым маршрутом, ближайшие секунды
+// не записываются: они говорят о телефоне, а не об узле.
+func VupenObservatoryNetworkChanged(reason string) {
+	burst.VupenObservatoryNetworkChanged(reason)
 }
 
 // SetMemoryLimitMB задаёт soft-limit Go-heap в МБ через `runtime/debug`.
