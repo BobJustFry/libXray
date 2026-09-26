@@ -1,127 +1,167 @@
 package xray
 
 import (
-	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/xtls/libxray/nodep"
 )
 
-const tspuTestFileBytes = 64 << 10
+// tspuFreezer — TCP-ретранслятор перед сервером, который ведёт себя как ТСПУ:
+// после limit байт (в обе стороны вместе) перестаёт пересылать данные, но
+// соединение не закрывает. limit == 0 — пропускает всё.
+type tspuFreezer struct {
+	ln    net.Listener
+	limit int64
+}
 
-// Узел в тесте — ядро с SOCKS-входом и выходом freedom: путь запроса тот же,
-// что у настоящей проверки, только «сервер» свой и ведёт себя как задано.
-func tspuTestCore(t *testing.T) (configPath, proxy string) {
+func startTspuFreezer(t *testing.T, backend string, limit int64) *tspuFreezer {
 	t.Helper()
-	ports, err := nodep.GetFreePorts(1)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := fmt.Sprintf(`{"log":{"loglevel":"none"},`+
-		`"inbounds":[{"listen":"127.0.0.1","port":%d,"protocol":"socks","settings":{"udp":false}}],`+
-		`"outbounds":[{"protocol":"freedom","tag":"direct"}]}`, ports[0])
-	configPath = filepath.Join(t.TempDir(), "probe.json")
-	if err := os.WriteFile(configPath, []byte(cfg), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return configPath, fmt.Sprintf("socks5://127.0.0.1:%d", ports[0])
-}
-
-type tspuServer struct {
-	sendBytes   int           // сколько тела отдать; меньше файла — дальше тишина
-	headerDelay time.Duration // молчание до заголовков
-	pingDelay   time.Duration // задержка ответа на HEAD (медленный узел)
-}
-
-// HEAD → 204 (пинг), GET → тело размером tspuTestFileBytes. Недоотданное тело —
-// тишина без закрытия соединения, как у соединения под заморозкой ТСПУ.
-func (c tspuServer) start(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wait := func(d time.Duration) bool {
-			select {
-			case <-time.After(d):
-				return true
-			case <-r.Context().Done():
-				return false
-			}
-		}
-		if r.Method == http.MethodHead {
-			if c.pingDelay > 0 && !wait(c.pingDelay) {
+	f := &tspuFreezer{ln: ln, limit: limit}
+	var wg sync.WaitGroup
+	t.Cleanup(func() {
+		ln.Close()
+		wg.Wait()
+	})
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
 				return
 			}
-			w.WriteHeader(http.StatusNoContent)
-			return
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				f.relay(c, backend)
+			}()
 		}
-		if c.headerDelay > 0 && !wait(c.headerDelay) {
-			return
+	}()
+	return f
+}
+
+func (f *tspuFreezer) relay(client net.Conn, backend string) {
+	defer client.Close()
+	server, err := net.Dial("tcp", backend)
+	if err != nil {
+		return
+	}
+	defer server.Close()
+	var total atomic.Int64
+	frozen := make(chan struct{})
+	var once sync.Once
+	pipe := func(dst, src net.Conn) {
+		buf := make([]byte, 1024)
+		for {
+			n, err := src.Read(buf)
+			if n > 0 {
+				if f.limit > 0 && total.Add(int64(n)) > f.limit {
+					once.Do(func() { close(frozen) })
+					return // дальше тишина: не пишем и не закрываем
+				}
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
 		}
-		w.Header().Set("Content-Length", fmt.Sprint(tspuTestFileBytes))
+	}
+	done := make(chan struct{}, 2)
+	go func() { pipe(server, client); done <- struct{}{} }()
+	go func() { pipe(client, server); done <- struct{}{} }()
+	select {
+	case <-done:
+	case <-frozen:
+		// Держим оба соединения открытыми, пока клиент сам не сдастся.
+		buf := make([]byte, 1024)
+		for {
+			if _, err := client.Read(buf); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (f *tspuFreezer) port() int { return f.ln.Addr().(*net.TCPAddr).Port }
+
+func tspuTLSBackend(t *testing.T, closeEach bool) string {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if closeEach {
+			w.Header().Set("Connection", "close")
+		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(strings.Repeat("x", c.sendBytes)))
-		w.(http.Flusher).Flush()
-		if c.sendBytes < tspuTestFileBytes {
-			<-r.Context().Done()
-		}
 	}))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv.Listener.Addr().String()
 }
 
-// stallSec = 1 — чтобы тесты шли секунды; порог всё равно не ниже 3×пинг.
-func runTspuProbe(t *testing.T, srv *httptest.Server, downloadTimeoutSec int) TspuProbeResult {
+func runRawProbe(t *testing.T, port int) TspuRawResult {
 	t.Helper()
-	configPath, proxy := tspuTestCore(t)
-	return TspuProbe(t.TempDir(), configPath, 5, srv.URL+"/ping", srv.URL+"/file",
-		tspuTestFileBytes, downloadTimeoutSec, 1, proxy)
+	// Шаг ждёт не меньше 1 с — чтобы тесты шли секунды, а не минуты.
+	return TspuRawProbe("127.0.0.1", port, "example.com", "example.com", "chrome",
+		10, 4000, 3, 1000, 1500)
 }
 
-func TestTspuProbeFullDownload(t *testing.T) {
-	r := runTspuProbe(t, tspuServer{sendBytes: tspuTestFileBytes}.start(t), 10)
-	if r.PingMs < 0 || r.Status != http.StatusOK || r.Bytes != tspuTestFileBytes ||
-		r.Stalled || r.Err != "" || r.FirstByteMs < 0 {
-		t.Fatalf("full download: %+v", r)
+func TestTspuRawProbePathIsClean(t *testing.T) {
+	f := startTspuFreezer(t, tspuTLSBackend(t, false), 0)
+	r := runRawProbe(t, f.port())
+	if r.Stage != "done" || r.Steps != 10 || r.Silent || r.Err != "" || r.RttMs < 0 {
+		t.Fatalf("clean path must pass every step: %+v", r)
+	}
+	if r.SentBytes < 40_000 {
+		t.Fatalf("the probe must push tens of kilobytes over the wire, sent %d", r.SentBytes)
 	}
 }
 
-func TestTspuProbeFreezeAfter16K(t *testing.T) {
-	r := runTspuProbe(t, tspuServer{sendBytes: 16 << 10}.start(t), 10)
-	if r.PingMs < 0 || r.Status != http.StatusOK || r.Bytes != 16<<10 || !r.Stalled {
-		t.Fatalf("freeze at 16 KiB must be reported as stalled with 16384 bytes: %+v", r)
+func TestTspuRawProbeFreezeMidPush(t *testing.T) {
+	f := startTspuFreezer(t, tspuTLSBackend(t, false), 16<<10)
+	start := time.Now()
+	r := runRawProbe(t, f.port())
+	if r.Stage != "push" || !r.Silent || r.Steps >= 10 {
+		t.Fatalf("a freeze after 16 KiB must end the push in silence: %+v", r)
 	}
-	if r.StallMs != 1000 || r.DownloadMs > 5000 {
-		t.Fatalf("stall watchdog must stop the download after ~1 s: %+v", r)
+	if total := r.SentBytes + r.RecvBytes; total < 12<<10 {
+		t.Fatalf("the freeze must be seen after >=12 KiB on the wire, got %d", total)
 	}
-}
-
-// Тишина до первого байта — не заморозка: через узел к этому моменту прошли
-// только рукопожатия, это ниже порога ТСПУ. Загрузка ждёт до общего таймаута.
-func TestTspuProbeSilenceBeforeBodyIsNotAStall(t *testing.T) {
-	r := runTspuProbe(t, tspuServer{sendBytes: tspuTestFileBytes, headerDelay: time.Minute}.start(t), 3)
-	if r.PingMs < 0 || r.Status != 0 || r.Bytes != 0 || r.Stalled || r.Err == "" ||
-		r.FirstByteMs != -1 {
-		t.Fatalf("silence before the body must end as a timeout, not a stall: %+v", r)
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("a freeze must be caught by the step timeout, took %s", time.Since(start))
 	}
 }
 
-// Медленный первый байт при целом файле — это ОК, а не заморозка.
-func TestTspuProbeSlowFirstByteStillCompletes(t *testing.T) {
-	r := runTspuProbe(t, tspuServer{sendBytes: tspuTestFileBytes, headerDelay: 2 * time.Second}.start(t), 10)
-	if r.Stalled || r.Bytes != tspuTestFileBytes || r.FirstByteMs < 2000 {
-		t.Fatalf("a slow start with a whole file is not a freeze: %+v", r)
+func TestTspuRawProbeFreezeInsideHandshake(t *testing.T) {
+	f := startTspuFreezer(t, tspuTLSBackend(t, false), 3<<10)
+	r := runRawProbe(t, f.port())
+	if r.Stage != "tls" || !r.Silent || r.ConnectMs != -1 {
+		t.Fatalf("silence inside the handshake must be a silent tls stage: %+v", r)
+	}
+	if total := r.SentBytes + r.RecvBytes; total >= 12<<10 {
+		t.Fatalf("this freeze happened below 12 KiB, got %d", total)
 	}
 }
 
-// Порог тишины растёт с пингом: медленный узел не сходит за замороженный.
-func TestTspuProbeStallThresholdFollowsPing(t *testing.T) {
-	r := runTspuProbe(t, tspuServer{sendBytes: 16 << 10, pingDelay: 600 * time.Millisecond}.start(t), 15)
-	if !r.Stalled || r.PingMs < 600 || r.StallMs < 3*r.PingMs {
-		t.Fatalf("stall threshold must be at least 3×ping: %+v", r)
+func TestTspuRawProbeServerClosesIsAnErrorNotSilence(t *testing.T) {
+	f := startTspuFreezer(t, tspuTLSBackend(t, true), 0)
+	r := runRawProbe(t, f.port())
+	if r.Stage != "push" || r.Silent || r.Err == "" || r.Steps != 0 {
+		t.Fatalf("a server that closes after each reply is an error, not a freeze: %+v", r)
+	}
+}
+
+func TestTspuRawProbeClosedPort(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	r := runRawProbe(t, port)
+	if r.Stage != "tcp" || r.Silent || r.Err == "" {
+		t.Fatalf("a refused connection is an instant tcp error: %+v", r)
 	}
 }

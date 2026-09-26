@@ -8,41 +8,48 @@ import (
 	"github.com/xtls/libxray/xray"
 )
 
-type tspuProbeRequest struct {
-	DatDir             string `json:"datDir,omitempty"`
-	ConfigPath         string `json:"configPath,omitempty"`
-	PingTimeout        int    `json:"pingTimeout,omitempty"`
-	PingUrl            string `json:"pingUrl,omitempty"`
-	DownloadUrl        string `json:"downloadUrl,omitempty"`
-	Expected           int64  `json:"expected,omitempty"`
-	DownloadTimeoutSec int    `json:"downloadTimeoutSec,omitempty"`
-	StallSec           int    `json:"stallSec,omitempty"`
-	Proxy              string `json:"proxy,omitempty"`
+type tspuRawProbeRequest struct {
+	Ip                string `json:"ip,omitempty"`
+	Port              int    `json:"port,omitempty"`
+	Sni               string `json:"sni,omitempty"`
+	Host              string `json:"host,omitempty"`
+	Fingerprint       string `json:"fingerprint,omitempty"`
+	Steps             int    `json:"steps,omitempty"`
+	PadBytes          int    `json:"padBytes,omitempty"`
+	ConnectTimeoutSec int    `json:"connectTimeoutSec,omitempty"`
+	MinStepMs         int    `json:"minStepMs,omitempty"`
+	MaxStepMs         int    `json:"maxStepMs,omitempty"`
 }
 
-// TspuProbe — экспериментальная проверка узла на заморозку ТСПУ: пинг, затем
-// загрузка файла известного размера через тот же узел (см. xray.TspuProbe).
-func TspuProbe(base64Text string) string {
-	var response nodep.CallResponse[*xray.TspuProbeResult]
+// TspuRawProbe — экспериментальная проверка пути до узла на заморозку ТСПУ:
+// прямое TLS-соединение к IP узла и десятки килобайт по нему (см.
+// xray.TspuRawProbe). Прокси не нужен: меряется ровно путь до ноды.
+func TspuRawProbe(base64Text string) string {
+	var response nodep.CallResponse[*xray.TspuRawResult]
 	req, err := base64.StdEncoding.DecodeString(base64Text)
 	if err != nil {
 		return response.EncodeToBase64(nil, err)
 	}
-	var request tspuProbeRequest
-	if err := json.Unmarshal(req, &request); err != nil {
+	var q tspuRawProbeRequest
+	if err := json.Unmarshal(req, &q); err != nil {
 		return response.EncodeToBase64(nil, err)
 	}
-	if request.PingTimeout < 1 {
-		request.PingTimeout = 5
+	if q.Steps < 1 {
+		q.Steps = 10
 	}
-	if request.DownloadTimeoutSec < 1 {
-		request.DownloadTimeoutSec = 15
+	if q.PadBytes < 1 {
+		q.PadBytes = 4000
 	}
-	if request.StallSec < 1 {
-		request.StallSec = 5
+	if q.ConnectTimeoutSec < 1 {
+		q.ConnectTimeoutSec = 5
 	}
-	r := xray.TspuProbe(request.DatDir, request.ConfigPath, request.PingTimeout,
-		request.PingUrl, request.DownloadUrl, request.Expected,
-		request.DownloadTimeoutSec, request.StallSec, request.Proxy)
+	if q.MinStepMs < 1 {
+		q.MinStepMs = 1500
+	}
+	if q.MaxStepMs < q.MinStepMs {
+		q.MaxStepMs = 5000
+	}
+	r := xray.TspuRawProbe(q.Ip, q.Port, q.Sni, q.Host, q.Fingerprint,
+		q.Steps, q.PadBytes, q.ConnectTimeoutSec, q.MinStepMs, q.MaxStepMs)
 	return response.EncodeToBase64(&r, nil)
 }

@@ -2,151 +2,220 @@ package xray
 
 import (
 	"context"
-	"io"
+	gotls "crypto/tls"
+	"errors"
+	"math/rand/v2"
+	"net"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
-	"github.com/xtls/libxray/nodep"
+	xtls "github.com/xtls/xray-core/transport/internet/tls"
 )
 
-// TspuProbeResult — итог проверки узла на «заморозку» ТСПУ.
+// TspuRawResult — итог прямой проверки пути до узла на заморозку ТСПУ.
 //
-// ТСПУ не рвёт соединение с подозрительным адресом, а после первых ~16 КБ от
-// сервера перестаёт пропускать данные. Короткий пинг (HEAD, сотни байт)
-// такую заморозку не видит; загрузка заведомо большего объёма — видит.
-type TspuProbeResult struct {
-	// PingMs — задержка HEAD, как у обычного пинга; -1 — пинг не прошёл, и
-	// загрузку тогда не пробуем.
-	PingMs  int64  `json:"pingMs"`
-	PingErr string `json:"pingErr,omitempty"`
-	// Status — HTTP-код ответа на загрузку; 0 — заголовки не пришли.
-	Status int `json:"status"`
-	// Bytes — сколько байт тела пришло; Expected — сколько должно было.
-	Bytes    int64 `json:"bytes"`
-	Expected int64 `json:"expected"`
-	// DownloadMs — от запроса до конца загрузки или до остановки.
-	DownloadMs int64 `json:"downloadMs"`
-	// FirstByteMs — от запроса до первого байта тела; -1 — тело не началось.
-	FirstByteMs int64 `json:"firstByteMs"`
-	// Stalled — файл начал качаться, а потом данные перестали приходить на
-	// StallMs; загрузку оборвали. Так выглядит заморозка ТСПУ: тишина, не RST.
-	Stalled bool  `json:"stalled"`
-	StallMs int64 `json:"stallMs"`
-	Err     string `json:"err,omitempty"`
+// ТСПУ не рвёт соединение с зарубежным адресом хостинга, а после ~15–20 КБ в
+// одном TCP-соединении (в обе стороны, ~25 пакетов) перестаёт пропускать
+// данные: RST нет, клиент ждёт до таймаута (net4people/bbs#490). Проверка
+// повторяет метод dpi-detector: одно соединение к IP узла с его SNI и тем же
+// отпечатком TLS, что у туннеля, первый HEAD — жив ли узел, затем HEAD с
+// набивкой в заголовке, пока через соединение не пройдут десятки килобайт.
+// Прокси, пинг и сторонние сайты не участвуют: меряется ровно путь до ноды.
+type TspuRawResult struct {
+	// ConnectMs — TCP+TLS; -1 — не соединились.
+	ConnectMs int64 `json:"connectMs"`
+	// RttMs — первый HEAD без набивки; -1 — узел не ответил.
+	RttMs int64 `json:"rttMs"`
+	// StepTimeoutMs — сколько ждали ответа на каждый шаг с набивкой.
+	StepTimeoutMs int64 `json:"stepTimeoutMs"`
+	// Steps — сколько шагов с набивкой прошло из StepsTotal.
+	Steps      int `json:"steps"`
+	StepsTotal int `json:"stepsTotal"`
+	// SentBytes/RecvBytes — байты на самом TCP-соединении (TLS целиком): то,
+	// что видит ТСПУ.
+	SentBytes int64 `json:"sentBytes"`
+	RecvBytes int64 `json:"recvBytes"`
+	// Stage — где остановились: tcp, tls, alive, push; done — всё прошло.
+	Stage string `json:"stage"`
+	// Silent — остановились тишиной (таймаут), а не ошибкой. Заморозка ТСПУ —
+	// это тишина; RST, закрытие и прочие мгновенные ошибки — не её почерк.
+	Silent bool   `json:"silent"`
+	Err    string `json:"err,omitempty"`
 }
 
-// TspuProbe поднимает отдельное ядро по configPath (как Ping), делает HEAD на
-// pingURL и, если он прошёл, качает downloadURL через тот же узел, считая байты.
-// expected — сколько байт просили (ответ с Content-Length его уточняет).
-// downloadTimeoutSec ограничивает всю загрузку. Тишину внутри неё сторож считает
-// только после первого байта тела: до него через узел проходит ~6–12 КБ
-// рукопожатий, это ниже порога ТСПУ, и «файл не начался» заморозкой не считается
-// (так же делают dpi-checkers и dpi-detector). Порог тишины — max(stallSec,
-// 3×пинг): медленный узел не должен сходить за замороженный.
-func TspuProbe(datDir, configPath string, pingTimeoutSec int, pingURL, downloadURL string,
-	expected int64, downloadTimeoutSec, stallSec int, proxy string) TspuProbeResult {
-	r := TspuProbeResult{PingMs: -1, Expected: expected, FirstByteMs: -1}
+var errTspuServerClosed = errors.New("server closed the keep-alive connection")
 
-	InitEnv(datDir, "")
-	server, err := StartXray(configPath)
-	if err != nil {
-		r.PingErr = err.Error()
-		return r
-	}
-	if err := server.Start(); err != nil {
-		r.PingErr = err.Error()
-		return r
-	}
-	defer server.Close()
+type tspuCountingConn struct {
+	net.Conn
+	sent, recv *atomic.Int64
+}
 
-	delay, err := nodep.MeasureDelay(pingTimeoutSec, pingURL, proxy)
-	if err != nil {
-		r.PingErr = err.Error()
-		return r
-	}
-	r.PingMs = delay
+func (c *tspuCountingConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	c.recv.Add(int64(n))
+	return n, err
+}
 
-	downloadTimeout := time.Duration(downloadTimeoutSec) * time.Second
-	stall := time.Duration(stallSec) * time.Second
-	if byPing := 3 * time.Duration(delay) * time.Millisecond; byPing > stall {
-		stall = byPing
-	}
-	r.StallMs = stall.Milliseconds()
-	client, err := nodep.CoreHTTPClient(0, proxy)
-	if err != nil {
-		r.Err = err.Error()
-		return r
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		r.Err = err.Error()
-		return r
-	}
-	req.Header.Set("Cache-Control", "no-cache")
-	// Без сжатия: по сети должны пройти все expected байт, иначе порог ТСПУ
-	// можно и не пересечь (Go по умолчанию просит gzip).
-	req.Header.Set("Accept-Encoding", "identity")
+func (c *tspuCountingConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	c.sent.Add(int64(n))
+	return n, err
+}
 
-	start := time.Now()
-	var got atomic.Int64
-	// lastProgress == 0 — тело ещё не началось, сторож молчит.
-	var lastProgress atomic.Int64
-	var stalled atomic.Bool
-	done := make(chan struct{})
-	defer close(done)
-	// Сторож тишины: после первого байта тела байты должны приходить хотя бы раз
-	// в stall. Иначе загрузку обрываем и отмечаем, на скольких байтах она встала.
-	go func() {
-		t := time.NewTicker(200 * time.Millisecond)
-		defer t.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-				last := lastProgress.Load()
-				if last != 0 && time.Since(time.Unix(0, last)) > stall {
-					stalled.Store(true)
-					cancel()
-					return
-				}
-			}
-		}
+func tspuIsTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errTspuHandshakeTimeout) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
+var errTspuHandshakeTimeout = errors.New("tls handshake timeout")
+
+const tspuPadAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func tspuPad(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = tspuPadAlphabet[rand.IntN(len(tspuPadAlphabet))]
+	}
+	return string(b)
+}
+
+const tspuUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+
+// TspuRawProbe соединяется с ip:port напрямую (без прокси), делает TLS с sni и
+// отпечатком fingerprint (как у туннеля, ALPN http/1.1), шлёт HEAD на host и
+// затем steps запросов HEAD с padBytes набивки по тому же соединению. На каждый
+// шаг ждёт max(minStepMs, 3×RTT), но не больше maxStepMs; на TCP, TLS и первый
+// HEAD — connectTimeoutSec. Второе соединение не открывает: если сервер закрыл
+// первое, это ошибка шага, а не повод начать счёт байт заново.
+func TspuRawProbe(ip string, port int, sni, host, fingerprint string,
+	steps, padBytes, connectTimeoutSec, minStepMs, maxStepMs int) (r TspuRawResult) {
+	r = TspuRawResult{ConnectMs: -1, RttMs: -1, StepsTotal: steps, Stage: "tcp"}
+	var sent, recv atomic.Int64
+	defer func() {
+		r.SentBytes = sent.Load()
+		r.RecvBytes = recv.Load()
 	}()
-
-	resp, err := client.Do(req)
-	if err != nil {
-		r.DownloadMs = time.Since(start).Milliseconds()
-		r.Stalled = stalled.Load()
+	fail := func(err error) {
 		r.Err = err.Error()
-		return r
+		r.Silent = tspuIsTimeout(err)
 	}
-	defer resp.Body.Close()
-	r.Status = resp.StatusCode
-	if resp.ContentLength > 0 {
-		r.Expected = resp.ContentLength
+
+	connectTimeout := time.Duration(connectTimeoutSec) * time.Second
+	start := time.Now()
+	dialer := net.Dialer{Timeout: connectTimeout}
+	raw, err := dialer.Dial("tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	if err != nil {
+		fail(err)
+		return
 	}
-	buf := make([]byte, 8<<10)
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			if got.Add(int64(n)) == int64(n) {
-				r.FirstByteMs = time.Since(start).Milliseconds()
-			}
-			lastProgress.Store(time.Now().UnixNano())
+	counted := &tspuCountingConn{Conn: raw, sent: &sent, recv: &recv}
+
+	r.Stage = "tls"
+	fp := xtls.GetFingerprint(fingerprint)
+	if fp == nil {
+		fp = xtls.GetFingerprint("")
+	}
+	uconn := xtls.UClient(counted, &gotls.Config{
+		ServerName:         sni,
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"http/1.1"},
+	}, fp).(*xtls.UConn)
+	defer uconn.Close()
+	// Дедлайн на сокете, а не только контекст: тишина посреди рукопожатия
+	// должна закончиться таймаутом, который отличим от ошибки.
+	_ = raw.SetDeadline(time.Now().Add(connectTimeout))
+	hctx, hcancel := context.WithTimeout(context.Background(), connectTimeout)
+	err = uconn.WebsocketHandshakeContext(hctx)
+	hcancel()
+	if err != nil {
+		if hctx.Err() != nil {
+			err = errors.Join(errTspuHandshakeTimeout, err)
 		}
-		if rerr != nil {
-			if rerr != io.EOF {
-				r.Err = rerr.Error()
-			}
-			break
-		}
+		fail(err)
+		return
 	}
-	r.DownloadMs = time.Since(start).Milliseconds()
-	r.Bytes = got.Load()
-	r.Stalled = stalled.Load() && r.Bytes < r.Expected
-	return r
+	_ = raw.SetDeadline(time.Time{})
+	r.ConnectMs = time.Since(start).Milliseconds()
+
+	var dials atomic.Int32
+	tr := &http.Transport{
+		DialTLSContext: func(context.Context, string, string) (net.Conn, error) {
+			if dials.Add(1) > 1 {
+				return nil, errTspuServerClosed
+			}
+			return uconn, nil
+		},
+		MaxConnsPerHost:     1,
+		MaxIdleConnsPerHost: 1,
+		DisableCompression:  true,
+		// Только HTTP/1.1: ALPN h2 мы не предлагали.
+		TLSNextProto: map[string]func(string, *gotls.Conn) http.RoundTripper{},
+	}
+	defer tr.CloseIdleConnections()
+	client := &http.Client{
+		Transport: tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	if host == "" {
+		host = sni
+	}
+	if host == "" {
+		host = ip
+	}
+	url := "https://" + host + "/"
+	head := func(pad string, timeout time.Duration) error {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", tspuUserAgent)
+		req.Header.Set("Accept", "*/*")
+		if pad != "" {
+			req.Header.Set("X-Pad", pad)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	}
+
+	r.Stage = "alive"
+	t0 := time.Now()
+	if err := head("", connectTimeout); err != nil {
+		fail(err)
+		return
+	}
+	rtt := time.Since(t0)
+	r.RttMs = rtt.Milliseconds()
+
+	stepTimeout := 3 * rtt
+	if lo := time.Duration(minStepMs) * time.Millisecond; stepTimeout < lo {
+		stepTimeout = lo
+	}
+	if hi := time.Duration(maxStepMs) * time.Millisecond; stepTimeout > hi {
+		stepTimeout = hi
+	}
+	r.StepTimeoutMs = stepTimeout.Milliseconds()
+
+	r.Stage = "push"
+	for i := 0; i < steps; i++ {
+		if err := head(tspuPad(padBytes), stepTimeout); err != nil {
+			fail(err)
+			return
+		}
+		r.Steps++
+	}
+	r.Stage = "done"
+	return
 }
