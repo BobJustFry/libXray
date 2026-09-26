@@ -2,12 +2,20 @@ package xray
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/xtls/libxray/nodep"
+	corenet "github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/serial"
+	core "github.com/xtls/xray-core/core"
+	coreserial "github.com/xtls/xray-core/infra/conf/serial"
 )
 
 // TspuProxyResult — итог проверки узла загрузкой через его собственный протокол.
@@ -32,19 +40,17 @@ type TspuProxyResult struct {
 	FirstByteMs int64 `json:"firstByteMs"`
 	// Stalled — файл начал качаться, а потом данные перестали приходить на
 	// StallMs; загрузку оборвали.
-	Stalled bool  `json:"stalled"`
-	StallMs int64 `json:"stallMs"`
+	Stalled bool   `json:"stalled"`
+	StallMs int64  `json:"stallMs"`
 	Err     string `json:"err,omitempty"`
 }
 
 // TspuProxyProbe поднимает отдельное ядро по configPath (как Ping), делает HEAD
 // на pingURL через узел и, если он прошёл, качает downloadURL через тот же узел,
-// считая байты тела. Нужна для UDP-узлов (Hysteria): прямой TCP-замер
-// (TspuRawProbe) к ним неприменим, и проверить путь можно только через протокол
-// самого узла. expected — сколько байт просили (Content-Length уточняет).
-// downloadTimeoutSec ограничивает всю загрузку; тишину сторож считает только
-// после первого байта тела, порог — max(stallSec, 3×пинг), чтобы медленный узел
-// не сошёл за замороженный.
+// считая байты тела. Windows: узел за SOCKS-входом ядра на proxy. Нужна для
+// UDP-узлов (Hysteria): прямой TCP-замер (TspuRawProbe) к ним неприменим, и
+// проверить путь можно только через протокол самого узла. expected — сколько
+// байт просили (Content-Length уточняет).
 func TspuProxyProbe(datDir, configPath string, pingTimeoutSec int, pingURL, downloadURL string,
 	expected int64, downloadTimeoutSec, stallSec int, proxy string) TspuProxyResult {
 	r := TspuProxyResult{PingMs: -1, Expected: expected, FirstByteMs: -1}
@@ -67,28 +73,110 @@ func TspuProxyProbe(datDir, configPath string, pingTimeoutSec int, pingURL, down
 		return r
 	}
 	r.PingMs = delay
-
-	downloadTimeout := time.Duration(downloadTimeoutSec) * time.Second
-	stall := time.Duration(stallSec) * time.Second
-	if byPing := 3 * time.Duration(delay) * time.Millisecond; byPing > stall {
-		stall = byPing
-	}
-	r.StallMs = stall.Milliseconds()
 	client, err := nodep.CoreHTTPClient(0, proxy)
 	if err != nil {
 		r.Err = err.Error()
 		return r
 	}
+	tspuDownload(&r, client, downloadURL, downloadTimeoutSec, stallSec)
+	return r
+}
+
+// TspuConfigProbe — то же, что TspuProxyProbe, но без SOCKS и файла: ядро из
+// configJSON без входов, запросы идут через core.Dial — как MeasureOutboundDelayHead
+// на Apple и замер пинга в Android. Для iOS и macOS, где проверка идёт в процессе
+// приложения при выключенном VPN.
+func TspuConfigProbe(datDir, configJSON string, pingTimeoutSec int, pingURL, downloadURL string,
+	expected int64, downloadTimeoutSec, stallSec int) TspuProxyResult {
+	r := TspuProxyResult{PingMs: -1, Expected: expected, FirstByteMs: -1}
+	if datDir != "" {
+		InitEnv(datDir, "")
+	}
+	inst, err := tspuInstanceFromJSON(configJSON)
+	if err != nil {
+		r.PingErr = err.Error()
+		return r
+	}
+	defer inst.Close()
+
+	tr := &http.Transport{
+		TLSHandshakeTimeout: 6 * time.Second,
+		DisableKeepAlives:   true,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dest, err := corenet.ParseDestination(fmt.Sprintf("%s:%s", network, addr))
+			if err != nil {
+				return nil, err
+			}
+			return core.Dial(ctx, inst, dest)
+		},
+	}
+	defer tr.CloseIdleConnections()
+
+	pingClient := &http.Client{Transport: tr, Timeout: time.Duration(pingTimeoutSec) * time.Second}
+	delay, err := nodep.PingHTTPRequest(pingClient, pingURL, pingTimeoutSec)
+	if err != nil {
+		r.PingErr = err.Error()
+		return r
+	}
+	r.PingMs = delay
+	tspuDownload(&r, &http.Client{Transport: tr}, downloadURL, downloadTimeoutSec, stallSec)
+	return r
+}
+
+// tspuInstanceFromJSON — ядро для замера: без входов и без лишних приложений
+// (маршрутизация, наблюдатель, статистика), только outbound, диспетчер и лог —
+// как у MeasureOutboundDelayHead.
+func tspuInstanceFromJSON(cfgJSON string) (*core.Instance, error) {
+	if strings.TrimSpace(cfgJSON) == "" {
+		return nil, errors.New("empty configJSON")
+	}
+	config, err := coreserial.LoadJSONConfig(strings.NewReader(cfgJSON))
+	if err != nil {
+		return nil, fmt.Errorf("config load error: %w", err)
+	}
+	config.Inbound = nil
+	var apps []*serial.TypedMessage
+	for _, app := range config.App {
+		if app.Type == "xray.app.proxyman.OutboundConfig" ||
+			app.Type == "xray.app.dispatcher.Config" ||
+			app.Type == "xray.app.log.Config" {
+			apps = append(apps, app)
+		}
+	}
+	config.App = apps
+	inst, err := core.New(config)
+	if err != nil {
+		return nil, fmt.Errorf("instance creation failed: %w", err)
+	}
+	if err := inst.Start(); err != nil {
+		_ = inst.Close()
+		return nil, fmt.Errorf("startup failed: %w", err)
+	}
+	return inst, nil
+}
+
+// tspuDownload качает downloadURL клиентом client, считая байты тела, и пишет
+// итог в r (r.PingMs уже заполнен). downloadTimeoutSec ограничивает всю загрузку;
+// тишину сторож считает только после первого байта тела, порог —
+// max(stallSec, 3×пинг), чтобы медленный узел не сошёл за замороженный.
+func tspuDownload(r *TspuProxyResult, client *http.Client, downloadURL string,
+	downloadTimeoutSec, stallSec int) {
+	downloadTimeout := time.Duration(downloadTimeoutSec) * time.Second
+	stall := time.Duration(stallSec) * time.Second
+	if byPing := 3 * time.Duration(r.PingMs) * time.Millisecond; byPing > stall {
+		stall = byPing
+	}
+	r.StallMs = stall.Milliseconds()
 	ctx, cancel := context.WithTimeout(context.Background(), downloadTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		r.Err = err.Error()
-		return r
+		return
 	}
 	req.Header.Set("Cache-Control", "no-cache")
-	// Без сжатия: по сети должны пройти все expected байт, иначе порог ТСПУ
-	// можно и не пересечь (Go по умолчанию просит gzip).
+	// Без сжатия: по сети должны пройти все expected байт (Go по умолчанию
+	// просит gzip).
 	req.Header.Set("Accept-Encoding", "identity")
 
 	start := time.Now()
@@ -123,7 +211,7 @@ func TspuProxyProbe(datDir, configPath string, pingTimeoutSec int, pingURL, down
 		r.DownloadMs = time.Since(start).Milliseconds()
 		r.Stalled = stalled.Load()
 		r.Err = err.Error()
-		return r
+		return
 	}
 	defer resp.Body.Close()
 	r.Status = resp.StatusCode
@@ -149,5 +237,4 @@ func TspuProxyProbe(datDir, configPath string, pingTimeoutSec int, pingURL, down
 	r.DownloadMs = time.Since(start).Milliseconds()
 	r.Bytes = got.Load()
 	r.Stalled = stalled.Load() && r.Bytes < r.Expected
-	return r
 }

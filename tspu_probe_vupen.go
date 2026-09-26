@@ -92,3 +92,41 @@ func TspuProxyProbe(base64Text string) string {
 		q.DownloadUrl, q.Expected, q.DownloadTimeoutSec, q.StallSec, q.Proxy)
 	return response.EncodeToBase64(&r, nil)
 }
+
+type tspuConfigProbeRequest struct {
+	DatDir             string `json:"datDir,omitempty"`
+	ConfigJSON         string `json:"configJSON,omitempty"`
+	PingTimeout        int    `json:"pingTimeout,omitempty"`
+	PingUrl            string `json:"pingUrl,omitempty"`
+	DownloadUrl        string `json:"downloadUrl,omitempty"`
+	Expected           int64  `json:"expected,omitempty"`
+	DownloadTimeoutSec int    `json:"downloadTimeoutSec,omitempty"`
+	StallSec           int    `json:"stallSec,omitempty"`
+}
+
+// TspuConfigProbe — проверка UDP-узла (Hysteria) загрузкой через его протокол,
+// без SOCKS и файла: ядро из configJSON, запросы через core.Dial (см.
+// xray.TspuConfigProbe). Для iOS и macOS — в процессе приложения, VPN выключен.
+func TspuConfigProbe(base64Text string) string {
+	var response nodep.CallResponse[*xray.TspuProxyResult]
+	req, err := base64.StdEncoding.DecodeString(base64Text)
+	if err != nil {
+		return response.EncodeToBase64(nil, err)
+	}
+	var q tspuConfigProbeRequest
+	if err := json.Unmarshal(req, &q); err != nil {
+		return response.EncodeToBase64(nil, err)
+	}
+	if q.PingTimeout < 1 {
+		q.PingTimeout = 5
+	}
+	if q.DownloadTimeoutSec < 1 {
+		q.DownloadTimeoutSec = 15
+	}
+	if q.StallSec < 1 {
+		q.StallSec = 5
+	}
+	r := xray.TspuConfigProbe(q.DatDir, q.ConfigJSON, q.PingTimeout, q.PingUrl,
+		q.DownloadUrl, q.Expected, q.DownloadTimeoutSec, q.StallSec)
+	return response.EncodeToBase64(&r, nil)
+}

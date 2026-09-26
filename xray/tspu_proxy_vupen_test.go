@@ -125,3 +125,33 @@ func TestTspuProxyProbeStallThresholdFollowsPing(t *testing.T) {
 		t.Fatalf("stall threshold must be at least 3×ping: %+v", r)
 	}
 }
+
+// Вариант для Apple: без SOCKS — ядро из JSON без входов, запросы через core.Dial.
+func runConfigProbe(t *testing.T, srv *httptest.Server) TspuProxyResult {
+	t.Helper()
+	cfg := `{"log":{"loglevel":"none"},"outbounds":[{"protocol":"freedom","tag":"proxy"}]}`
+	return TspuConfigProbe(t.TempDir(), cfg, 5, srv.URL+"/ping", srv.URL+"/file",
+		tspuTestFileBytes, 10, 1)
+}
+
+func TestTspuConfigProbeFullDownload(t *testing.T) {
+	r := runConfigProbe(t, tspuServer{sendBytes: tspuTestFileBytes}.start(t))
+	if r.PingMs < 0 || r.Status != http.StatusOK || r.Bytes != tspuTestFileBytes ||
+		r.Stalled || r.Err != "" {
+		t.Fatalf("full download through core.Dial: %+v", r)
+	}
+}
+
+func TestTspuConfigProbeStall(t *testing.T) {
+	r := runConfigProbe(t, tspuServer{sendBytes: 16 << 10}.start(t))
+	if r.PingMs < 0 || r.Bytes != 16<<10 || !r.Stalled {
+		t.Fatalf("a stall through core.Dial must be reported: %+v", r)
+	}
+}
+
+func TestTspuConfigProbeBadConfigIsAPingFailure(t *testing.T) {
+	r := TspuConfigProbe(t.TempDir(), "{not json", 5, "http://127.0.0.1:1/", "http://127.0.0.1:1/", 1, 3, 1)
+	if r.PingMs != -1 || r.PingErr == "" {
+		t.Fatalf("a broken config must end before the ping: %+v", r)
+	}
+}
