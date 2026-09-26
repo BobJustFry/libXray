@@ -73,6 +73,12 @@ func CGoTspuRawProbe(base64Text *C.char) *C.char {
 	return C.CString(TspuRawProbe(text))
 }
 
+//export CGoTspuProxyProbe
+func CGoTspuProxyProbe(base64Text *C.char) *C.char {
+	text := C.GoString(base64Text)
+	return C.CString(TspuProxyProbe(text))
+}
+
 //export CGoQueryStats
 func CGoQueryStats(base64Text *C.char) *C.char {
 	text := C.GoString(base64Text)

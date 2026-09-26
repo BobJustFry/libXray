@@ -53,3 +53,42 @@ func TspuRawProbe(base64Text string) string {
 		q.Steps, q.PadBytes, q.ConnectTimeoutSec, q.MinStepMs, q.MaxStepMs)
 	return response.EncodeToBase64(&r, nil)
 }
+
+type tspuProxyProbeRequest struct {
+	DatDir             string `json:"datDir,omitempty"`
+	ConfigPath         string `json:"configPath,omitempty"`
+	PingTimeout        int    `json:"pingTimeout,omitempty"`
+	PingUrl            string `json:"pingUrl,omitempty"`
+	DownloadUrl        string `json:"downloadUrl,omitempty"`
+	Expected           int64  `json:"expected,omitempty"`
+	DownloadTimeoutSec int    `json:"downloadTimeoutSec,omitempty"`
+	StallSec           int    `json:"stallSec,omitempty"`
+	Proxy              string `json:"proxy,omitempty"`
+}
+
+// TspuProxyProbe — проверка UDP-узла (Hysteria) загрузкой через его протокол:
+// отдельное ядро по configPath, HEAD через узел и файл известного размера
+// (см. xray.TspuProxyProbe).
+func TspuProxyProbe(base64Text string) string {
+	var response nodep.CallResponse[*xray.TspuProxyResult]
+	req, err := base64.StdEncoding.DecodeString(base64Text)
+	if err != nil {
+		return response.EncodeToBase64(nil, err)
+	}
+	var q tspuProxyProbeRequest
+	if err := json.Unmarshal(req, &q); err != nil {
+		return response.EncodeToBase64(nil, err)
+	}
+	if q.PingTimeout < 1 {
+		q.PingTimeout = 5
+	}
+	if q.DownloadTimeoutSec < 1 {
+		q.DownloadTimeoutSec = 15
+	}
+	if q.StallSec < 1 {
+		q.StallSec = 5
+	}
+	r := xray.TspuProxyProbe(q.DatDir, q.ConfigPath, q.PingTimeout, q.PingUrl,
+		q.DownloadUrl, q.Expected, q.DownloadTimeoutSec, q.StallSec, q.Proxy)
+	return response.EncodeToBase64(&r, nil)
+}
