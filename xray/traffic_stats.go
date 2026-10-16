@@ -34,8 +34,8 @@ func vupenTrafficOutboundCounted(tag string) bool {
 // или выгрузка приложения ничего не теряют. Балансировщик перекладывает трафик
 // с узла на узел — сумма по всем outbound'ам этого не замечает.
 func QueryTrafficTotals() (uplink int64, downlink int64) {
-	s := coreServer
-	if s == nil || !s.IsRunning() {
+	s := runningCore()
+	if s == nil {
 		return 0, 0
 	}
 	feat := s.GetFeature(corestats.ManagerType())

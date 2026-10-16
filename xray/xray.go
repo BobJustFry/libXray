@@ -4,6 +4,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/xtls/libxray/memory"
 	"github.com/xtls/xray-core/common/cmdarg"
@@ -18,7 +19,18 @@ import (
 
 var (
 	coreServer *core.Instance
+	// coreServerNow — запущенное ядро для чтения из других горутин (CR-706):
+	// экспорты состояния и проверок зовутся из потоков платформы параллельно с
+	// Run/Stop. Ставится после успешного Start, снимается до Close — поэтому
+	// читатели не зовут IsRunning (в ядре он читает флаг без блокировки, а Close
+	// пишет его под блокировкой). Пишут только RunXray / RunXrayFromJSON / StopXray.
+	coreServerNow atomic.Pointer[core.Instance]
 )
+
+// runningCore — запущенное ядро или nil (без гонки с Run/Stop).
+func runningCore() *core.Instance {
+	return coreServerNow.Load()
+}
 
 func StartXray(configPath string) (*core.Instance, error) {
 	file := cmdarg.Arg{configPath}
@@ -94,6 +106,7 @@ func RunXray(datDir string, mphCachePath string, configPath string) (err error) 
 	if err = coreServer.Start(); err != nil {
 		return
 	}
+	coreServerNow.Store(coreServer)
 
 	debug.FreeOSMemory()
 	return nil
@@ -107,6 +120,7 @@ func RunXrayFromJSON(datDir string, mphCachePath string, configJSON string) (err
 	InitEnv(datDir, mphCachePath)
 	memory.InitForceFree()
 	coreServer, err = StartXrayFromJSON(configJSON)
+	coreServerNow.Store(coreServer)
 	if err != nil {
 		return
 	}
@@ -117,13 +131,14 @@ func RunXrayFromJSON(datDir string, mphCachePath string, configJSON string) (err
 
 // Get Xray State
 func GetXrayState() bool {
-	return coreServer != nil && coreServer.IsRunning()
+	return runningCore() != nil
 }
 
 // Stop Xray instance.
 func StopXray() error {
 	memory.StopForceFree()
 	if coreServer != nil {
+		coreServerNow.Store(nil)
 		err := coreServer.Close()
 		coreServer = nil
 		grpctransport.ResetTransportPool()

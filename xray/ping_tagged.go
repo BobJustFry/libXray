@@ -17,7 +17,8 @@ import (
 // forcing traffic through the outbound tag (observatory / tagged.Dialer pattern).
 // Requires GetXrayState()==true; config must not enable metrics for ping tests.
 func PingTaggedOutbound(timeout int, url string, outboundTag string) (int64, error) {
-	if coreServer == nil || !coreServer.IsRunning() {
+	server := runningCore()
+	if server == nil {
 		return nodep.PingDelayError, errors.New("xray not running")
 	}
 	tag := outboundTag
@@ -40,7 +41,7 @@ func PingTaggedOutbound(timeout int, url string, outboundTag string) (int64, err
 				return nil, err
 			}
 			ctx := session.SetForcedOutboundTagToContext(context.Background(), tag)
-			return core.Dial(ctx, coreServer, dest)
+			return core.Dial(ctx, server, dest)
 		},
 	}
 	client := &http.Client{

@@ -11,6 +11,7 @@ import (
 	"runtime/pprof"
 
 	"github.com/xtls/libxray/memory"
+	"github.com/xtls/libxray/xray"
 	"github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/app/observatory/burst"
 	"github.com/xtls/xray-core/proxy/tun"
@@ -23,7 +24,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 77
+const vupenCoreBuild = 78
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -57,6 +58,76 @@ func VupenObservatoryResume(reason string) {
 // не записываются: они говорят о телефоне, а не об узле.
 func VupenObservatoryNetworkChanged(reason string) {
 	burst.VupenObservatoryNetworkChanged(reason)
+}
+
+// ── Ядро 78: АВТО 4.1 (ADR-0001 §13). Те же имена и форматы — в DLL для Windows
+// (build/template/main.gotemplate, префикс CGo). JSON — строкой как есть (UTF-8),
+// не base64. Ошибок через границу нет: ошибка — текст или verdict "unknown".
+
+// VupenSetUplink — платформа сообщает тип сети и подпись пути при каждой их смене
+// (и один раз при старте ядра). kind: "cellular" | "wifi" | "wired" | "other" |
+// "none"; cellular — только сотовый интерфейс без Wi-Fi/Ethernet (раздача по
+// Wi-Fi — "wifi"; лимитный Wi-Fi — не cellular); Windows "cellular" не передаёт.
+// sig — подпись пути (набор интерфейсов + имя; Android — Network id), "" = kind.
+// Смена kind или sig — новая эпоха сети: соединения прежней сети закрываются
+// через 9 с стабильной новой, перелив в LTE сбрасывается, пробы обсерватории
+// ближайшие секунды не пишутся узлам (CR-105). Возвращает "" или текст ошибки
+// (неизвестный kind — ничего не меняется).
+func VupenSetUplink(kind string, sig string) string {
+	return burst.VupenSetUplink(kind, sig)
+}
+
+// VupenSetCheckURL — файл проверки 24 КБ: основной и запасной (запасной — когда
+// основной ответил не 200; "" — без запасного). Только https. Зовёт платформа
+// при старте ядра; по умолчанию — Cloudflare 24 КБ. Возвращает "" или текст ошибки
+// (адреса тогда не меняются).
+func VupenSetCheckURL(primary string, fallback string) string {
+	return burst.VupenSetCheckURL(primary, fallback)
+}
+
+// VupenAutoState — состояние АВТО 4.1, JSON:
+//
+//	{"v":1,"active":true,"detail":"","balancer":"REG",
+//	 "uplink":"cellular","sig":"cellular:pdp_ip0","epoch":3,"stableForMs":12000,
+//	 "tier":"regular|lte","phase":"new|checking|holding|searching|no-working",
+//	 "regularAlive":7,"lteAlive":3,                       // живых по последнему поиску; -1 — поиска не было
+//	 "sticky":{"since":0,"startVerdict":"ok|failed|unknown|none","searching":false,"nextSearchAtMs":0,
+//	           "lastFailSignal":{"atMs":0,"kind":"dial|freeze|manual","detail":""}},
+//	 "current":{"balancer":"REG|LTE","tag":"proxy-4","host":"1.2.3.4","port":443},
+//	 "spilled":false,"noWorking":false,"failedChecks":0,
+//	 "network":"up|down|unknown|",                        // сеть устройства по последней проверке
+//	 "notice":"|searching|no_working|no_network|lte",     // какое сообщение показать (D-27, D-12, D-14 п. 4)
+//	 "lastFailure":{"atMs":0,"kind":"check|verify|check-route","detail":""},
+//	 "pendingClose":{"atMs":0,"reason":"net-change|lte-return","conns":0},
+//	 "lastClose":{"atMs":0,"reason":"net-change|lte-return|check-route","conns":0},
+//	 "lastSwitch":{"atMs":0,"from":"proxy-4","to":"proxy-7","reason":"check|search|spill|return"},
+//	 "lastCheckRoute":{"atMs":0,"mode":"check|heal","verdict":"","from":"","to":"","reason":""},
+//	 "spills":0,"returns":0,"spillBlocked":""}
+//
+// Время — мс Unix UTC, 0 — не было. Ядро не запущено или без АВТО 4.1 —
+// "active":false и причина в "detail".
+func VupenAutoState() string {
+	return xray.VupenAutoState()
+}
+
+// VupenCheckRoute — проверка маршрута на переднем плане (ADR-0001 §5.1), синхронно:
+// check ≤ 8 с (ничего не меняет), heal ≤ 15 с (после failed). Запрос:
+//
+//	{"v":1,"mode":"check|heal","balancer":"REG","url":"https://…","fallbackUrl":"https://…",
+//	 "bytes":24576,"minStallMs":1500,"maxFirstByteMs":5000,"timeoutMs":6000,"maxSwitches":3,
+//	 "excludeMin":15,"closeConnections":true,"reason":"foreground|after-connect|manual"}
+//
+// Все поля, кроме mode, необязательны (0 / "" — значения ядра и VupenSetCheckURL;
+// closeConnections по умолчанию true). Ответ:
+//
+//	{"v":1,"verdict":"ok|failed|switched|network_down|no_working|spilled_lte|unknown",
+//	 "from":"proxy-4","to":"proxy-7","tried":2,"ms":2310,"kind":"stall|nostart|error|http",
+//	 "detail":"stalled at 16 KB of 24 (1.5s silence)","balancer":"REG|LTE","closed":3}
+//
+// failed — только в check; ошибка запроса или «ядро не запущено» — verdict
+// "unknown" с причиной в detail. Туннель и ядро не перезапускаются.
+func VupenCheckRoute(req string) string {
+	return xray.VupenCheckRoute(req)
 }
 
 // SetMemoryLimitMB задаёт soft-limit Go-heap в МБ через `runtime/debug`.

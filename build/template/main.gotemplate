@@ -1,6 +1,17 @@
 package main
 
+// #include <stdlib.h>
 import "C"
+
+import "unsafe"
+
+// Каждая строка, которую возвращает CGo* этой DLL (char*), выделена C.CString
+// (malloc в куче C этой DLL). Вызывающий обязан освободить её CGoFree, когда
+// прочитал; free() другой C-библиотеки для этого не годится.
+//export CGoFree
+func CGoFree(p *C.char) {
+	C.free(unsafe.Pointer(p))
+}
 
 func main() {}
 
@@ -159,4 +170,27 @@ func CGoForceGC() {
 //export CGoWriteHeapProfile
 func CGoWriteHeapProfile(path *C.char) *C.char {
 	return C.CString(WriteHeapProfile(C.GoString(path)))
+}
+
+// Ядро 78 (АВТО 4.1, ADR-0001 §13): те же функции, что у Apple (tuning_vupen.go).
+// Строки — UTF-8 как есть (JSON не в base64). Возвращаемую строку освободить
+// CGoFree (см. начало файла).
+//export CGoVupenSetUplink
+func CGoVupenSetUplink(kind *C.char, sig *C.char) *C.char {
+	return C.CString(VupenSetUplink(C.GoString(kind), C.GoString(sig)))
+}
+
+//export CGoVupenSetCheckURL
+func CGoVupenSetCheckURL(primary *C.char, fallback *C.char) *C.char {
+	return C.CString(VupenSetCheckURL(C.GoString(primary), C.GoString(fallback)))
+}
+
+//export CGoVupenAutoState
+func CGoVupenAutoState() *C.char {
+	return C.CString(VupenAutoState())
+}
+
+//export CGoVupenCheckRoute
+func CGoVupenCheckRoute(req *C.char) *C.char {
+	return C.CString(VupenCheckRoute(C.GoString(req)))
 }
