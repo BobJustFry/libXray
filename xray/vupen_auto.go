@@ -24,5 +24,5 @@ func vupenRouter() *router.Router {
 // VupenAutoState — JSON состояния АВТО 4.1.
 func VupenAutoState() string { return vupenRouter().VupenAutoState() }
 
-// VupenCheckRoute — JSON-запрос check | heal, JSON-ответ.
+// VupenCheckRoute — JSON-запрос check | heal | switch (ядро 79), JSON-ответ.
 func VupenCheckRoute(req string) string { return vupenRouter().VupenCheckRoute(req) }

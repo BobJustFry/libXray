@@ -24,7 +24,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 78
+const vupenCoreBuild = 79
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -111,20 +111,23 @@ func VupenAutoState() string {
 }
 
 // VupenCheckRoute — проверка маршрута на переднем плане (ADR-0001 §5.1), синхронно:
-// check ≤ 8 с (ничего не меняет), heal ≤ 15 с (после failed). Запрос:
+// check ≤ 8 с (ничего не меняет), heal ≤ 15 с (после failed), switch ≤ 15 с (ядро 79,
+// кнопка «Сменить сервер»: текущий не проверяется и не исключается, перебор по кругу
+// внутри той же группы, без перелива в LTE). Запрос:
 //
-//	{"v":1,"mode":"check|heal","balancer":"REG","url":"https://…","fallbackUrl":"https://…",
+//	{"v":1,"mode":"check|heal|switch","balancer":"REG","url":"https://…","fallbackUrl":"https://…",
 //	 "bytes":24576,"minStallMs":1500,"maxFirstByteMs":5000,"timeoutMs":6000,"maxSwitches":3,
 //	 "excludeMin":15,"closeConnections":true,"reason":"foreground|after-connect|manual"}
 //
 // Все поля, кроме mode, необязательны (0 / "" — значения ядра и VupenSetCheckURL;
 // closeConnections по умолчанию true). Ответ:
 //
-//	{"v":1,"verdict":"ok|failed|switched|network_down|no_working|spilled_lte|unknown",
+//	{"v":1,"verdict":"ok|failed|switched|no_alternative|network_down|no_working|spilled_lte|unknown",
 //	 "from":"proxy-4","to":"proxy-7","tried":2,"ms":2310,"kind":"stall|nostart|error|http",
 //	 "detail":"stalled at 16 KB of 24 (1.5s silence)","balancer":"REG|LTE","closed":3}
 //
-// failed — только в check; ошибка запроса или «ядро не запущено» — verdict
+// failed — только в check; no_alternative — только в switch (другого рабочего нет,
+// остались на from, to = from); ошибка запроса или «ядро не запущено» — verdict
 // "unknown" с причиной в detail. Туннель и ядро не перезапускаются.
 func VupenCheckRoute(req string) string {
 	return xray.VupenCheckRoute(req)

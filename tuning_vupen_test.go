@@ -8,7 +8,7 @@ import (
 
 // Ядро 78: экспорты АВТО 4.1 без запущенного ядра — понятный ответ, без паники.
 func TestVupenExportsWithoutCore(t *testing.T) {
-	if VupenCoreBuild() != "78" {
+	if VupenCoreBuild() != "79" {
 		t.Fatalf("core build %s", VupenCoreBuild())
 	}
 	var st map[string]any
@@ -21,6 +21,7 @@ func TestVupenExportsWithoutCore(t *testing.T) {
 	for req, want := range map[string]string{
 		`{"v":1,"mode":"check"}`:   "the core is not running",
 		`{"v":1,"mode":"heal"}`:    "the core is not running",
+		`{"v":1,"mode":"switch"}`:  "the core is not running",
 		`not json`:                 "bad request",
 		`{"v":1,"mode":"restart"}`: "bad request",
 	} {
