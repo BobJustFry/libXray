@@ -66,3 +66,17 @@ func TestVupenSetCheckURLExport(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+// T-075: в диагностике памяти — сборщик и кэши транспортов (новые поля в конце,
+// heap_alloc остаётся первым: его разбирают Swift и Dart по префиксу).
+func TestGoMemoryDiagFields(t *testing.T) {
+	d := GoMemoryDiag()
+	if !strings.HasPrefix(d, "heap_alloc=") {
+		t.Fatalf("heap_alloc must stay first: %s", d)
+	}
+	for _, k := range []string{" goroutines=", " num_gc=", " gc_cpu=", " grpc_pool=", " xhttp_pool=", " xhttp_clients="} {
+		if !strings.Contains(d, k) {
+			t.Fatalf("%q missing: %s", k, d)
+		}
+	}
+}

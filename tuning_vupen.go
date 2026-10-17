@@ -16,6 +16,7 @@ import (
 	"github.com/xtls/xray-core/app/observatory/burst"
 	"github.com/xtls/xray-core/proxy/tun"
 	grpctransport "github.com/xtls/xray-core/transport/internet/grpc"
+	"github.com/xtls/xray-core/transport/internet/splithttp"
 	"golang.org/x/net/http2"
 )
 
@@ -164,8 +165,13 @@ func GoMemoryDiag() string {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	const mb = 1024.0 * 1024.0
+	// T-075: num_gc / gc_cpu (молотит ли сборщик: два замера с паузой дают
+	// частоту) и размеры кэшей транспортов на весь процесс (gRPC и XHTTP): рост
+	// при неизменном числе узлов — утечка клиентов. Новые поля — только в конце.
+	xhttpPool, xhttpClients := splithttp.VupenDialerPoolSize()
 	return fmt.Sprintf(
-		"heap_alloc=%.1fMB heap_sys=%.1fMB stack=%.1fMB heap_idle=%.1fMB heap_released=%.1fMB sys=%.1fMB go_limit_use=%.1fMB goroutines=%d",
+		"heap_alloc=%.1fMB heap_sys=%.1fMB stack=%.1fMB heap_idle=%.1fMB heap_released=%.1fMB sys=%.1fMB go_limit_use=%.1fMB goroutines=%d"+
+			" num_gc=%d gc_cpu=%.4f grpc_pool=%d xhttp_pool=%d xhttp_clients=%d",
 		float64(ms.HeapAlloc)/mb,
 		float64(ms.HeapSys)/mb,
 		float64(ms.StackInuse)/mb,
@@ -174,6 +180,11 @@ func GoMemoryDiag() string {
 		float64(ms.Sys)/mb,
 		float64(ms.Sys-ms.HeapReleased)/mb,
 		runtime.NumGoroutine(),
+		ms.NumGC,
+		ms.GCCPUFraction,
+		grpctransport.TransportPoolSize(),
+		xhttpPool,
+		xhttpClients,
 	)
 }
 
