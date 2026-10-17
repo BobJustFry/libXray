@@ -80,3 +80,16 @@ func TestGoMemoryDiagFields(t *testing.T) {
 		}
 	}
 }
+
+// T-079: настройка «Apple через VPN при белых списках» видна в состоянии и без ядра.
+func TestVupenSetAppleViaVpnOnLte(t *testing.T) {
+	t.Cleanup(func() { VupenSetAppleViaVpnOnLte(false) })
+	VupenSetAppleViaVpnOnLte(true)
+	var st map[string]any
+	if err := json.Unmarshal([]byte(VupenAutoState()), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["appleViaVpnOnLte"] != true || st["appleViaVpnActive"] != false {
+		t.Fatalf("state: %v", st)
+	}
+}

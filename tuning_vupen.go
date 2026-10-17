@@ -14,6 +14,7 @@ import (
 	"github.com/xtls/libxray/xray"
 	"github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/app/observatory/burst"
+	"github.com/xtls/xray-core/app/router"
 	"github.com/xtls/xray-core/proxy/tun"
 	grpctransport "github.com/xtls/xray-core/transport/internet/grpc"
 	"github.com/xtls/xray-core/transport/internet/splithttp"
@@ -109,6 +110,16 @@ func VupenSetCheckURL(primary string, fallback string) string {
 // "active":false и причина в "detail".
 func VupenAutoState() string {
 	return xray.VupenAutoState()
+}
+
+// VupenSetAppleViaVpnOnLte — настройка «Apple через VPN при белых списках»
+// (T-079): пока АВТО 4.1 перелит в мобильную группу, правило конфига с ruleTag
+// "vupen-apple-direct" пропускается и Apple идёт через VPN; иначе — напрямую.
+// На процесс (переживает перезапуск ядра), звать в любой момент; ядро не
+// перезапускается, открытые соединения не трогаются. Состояние — VupenAutoState:
+// appleViaVpnOnLte (настройка), appleViaVpnActive (действует сейчас).
+func VupenSetAppleViaVpnOnLte(on bool) {
+	router.VupenSetAppleViaVpnOnLte(on)
 }
 
 // VupenCheckRoute — проверка маршрута на переднем плане (ADR-0001 §5.1), синхронно:
