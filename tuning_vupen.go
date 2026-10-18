@@ -26,7 +26,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 80
+const vupenCoreBuild = 81
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -112,12 +112,23 @@ func VupenAutoState() string {
 	return xray.VupenAutoState()
 }
 
-// VupenSetAppleViaVpnOnLte — настройка «Apple через VPN при белых списках»
-// (T-079): пока АВТО 4.1 перелит в мобильную группу, правило конфига с ruleTag
-// "vupen-apple-direct" пропускается и Apple идёт через VPN; иначе — напрямую.
-// На процесс (переживает перезапуск ядра), звать в любой момент; ядро не
-// перезапускается, открытые соединения не трогаются. Состояние — VupenAutoState:
-// appleViaVpnOnLte (настройка), appleViaVpnActive (действует сейчас).
+// VupenSetAppleViaVpnMode — настройка «Apple через VPN при белых списках»
+// (T-084, ядро 81): правило конфига с ruleTag "vupen-apple-direct" пропускается
+// и Apple идёт через VPN:
+//
+//	0 — никогда (Apple напрямую);
+//	1 — пока АВТО 4.1 перелит в мобильную группу (как VupenSetAppleViaVpnOnLte(true));
+//	2 — всегда («Вручную» выбран узел мобильной группы).
+//
+// Другое значение не меняет ничего (предупреждение в журнале). На процесс
+// (переживает перезапуск ядра), звать в любой момент; ядро не перезапускается,
+// открытые соединения не трогаются. Состояние — VupenAutoState: appleViaVpnMode,
+// appleViaVpnOnLte (режим не 0), appleViaVpnActive (правило пропускается сейчас).
+func VupenSetAppleViaVpnMode(mode int) {
+	router.VupenSetAppleViaVpnMode(mode)
+}
+
+// VupenSetAppleViaVpnOnLte — прежний вызов (T-079): true → режим 1, false → 0.
 func VupenSetAppleViaVpnOnLte(on bool) {
 	router.VupenSetAppleViaVpnOnLte(on)
 }

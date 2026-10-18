@@ -8,7 +8,7 @@ import (
 
 // Ядро 78: экспорты АВТО 4.1 без запущенного ядра — понятный ответ, без паники.
 func TestVupenExportsWithoutCore(t *testing.T) {
-	if VupenCoreBuild() != "80" {
+	if VupenCoreBuild() != "81" {
 		t.Fatalf("core build %s", VupenCoreBuild())
 	}
 	var st map[string]any
@@ -89,7 +89,31 @@ func TestVupenSetAppleViaVpnOnLte(t *testing.T) {
 	if err := json.Unmarshal([]byte(VupenAutoState()), &st); err != nil {
 		t.Fatal(err)
 	}
-	if st["appleViaVpnOnLte"] != true || st["appleViaVpnActive"] != false {
+	if st["appleViaVpnOnLte"] != true || st["appleViaVpnActive"] != false || st["appleViaVpnMode"] != float64(1) {
 		t.Fatalf("state: %v", st)
+	}
+}
+
+// T-084: режим 2 действует и без АВТО; неверный режим ничего не меняет.
+func TestVupenSetAppleViaVpnMode(t *testing.T) {
+	t.Cleanup(func() { VupenSetAppleViaVpnMode(0) })
+	state := func() map[string]any {
+		var st map[string]any
+		if err := json.Unmarshal([]byte(VupenAutoState()), &st); err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	VupenSetAppleViaVpnMode(2)
+	if st := state(); st["appleViaVpnMode"] != float64(2) || st["appleViaVpnOnLte"] != true || st["appleViaVpnActive"] != true {
+		t.Fatalf("mode 2: %v", st)
+	}
+	VupenSetAppleViaVpnMode(7)
+	if st := state(); st["appleViaVpnMode"] != float64(2) {
+		t.Fatalf("invalid mode changed the setting: %v", st)
+	}
+	VupenSetAppleViaVpnMode(0)
+	if st := state(); st["appleViaVpnMode"] != float64(0) || st["appleViaVpnOnLte"] != false || st["appleViaVpnActive"] != false {
+		t.Fatalf("mode 0: %v", st)
 	}
 }
