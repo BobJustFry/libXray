@@ -26,7 +26,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 81
+const vupenCoreBuild = 82
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -104,7 +104,11 @@ func VupenSetCheckURL(primary string, fallback string) string {
 //	 "lastClose":{"atMs":0,"reason":"net-change|lte-return|check-route","conns":0},
 //	 "lastSwitch":{"atMs":0,"from":"proxy-4","to":"proxy-7","reason":"check|search|spill|return"},
 //	 "lastCheckRoute":{"atMs":0,"mode":"check|heal","verdict":"","from":"","to":"","reason":""},
-//	 "spills":0,"returns":0,"spillBlocked":""}
+//	 "spills":0,"returns":0,"spillBlocked":"",
+//	 "netClass":"normal|whitelist|noNetwork|unknown|",    // ядро 82: класс сети по прямой пробе DNS (только сотовая)
+//	 "netClassAtMs":0,                                    // время последней пробы, мс Unix UTC; 0 — не было
+//	 "netClassHosts":"1.1.1.1=ok 8.8.8.8=fail ...",       // итог по адресам, коротко
+//	 "netClassWhitelist":false}                           // перелив в LTE сделан из-за белых списков
 //
 // Время — мс Unix UTC, 0 — не было. Ядро не запущено или без АВТО 4.1 —
 // "active":false и причина в "detail".
