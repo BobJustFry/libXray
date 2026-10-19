@@ -8,7 +8,7 @@ import (
 
 // Ядро 78: экспорты АВТО 4.1 без запущенного ядра — понятный ответ, без паники.
 func TestVupenExportsWithoutCore(t *testing.T) {
-	if VupenCoreBuild() != "84" {
+	if VupenCoreBuild() != "85" {
 		t.Fatalf("core build %s", VupenCoreBuild())
 	}
 	var st map[string]any
@@ -64,6 +64,13 @@ func TestVupenSetCheckURLExport(t *testing.T) {
 	}
 	if e := VupenSetCheckURL("https://vupen.fun/app/probe/24k.bin", def); e != "" {
 		t.Fatal(e)
+	}
+	// Ядро 85: запасные адреса списком через пробел (мосты Kotlin/Swift/Windows не менялись).
+	if e := VupenSetCheckURL("https://cdn.jsdelivr.net/a.js", "https://code.jquery.com/b.js "+def); e != "" {
+		t.Fatal(e)
+	}
+	if e := VupenSetCheckURL("https://cdn.jsdelivr.net/a.js", "https://code.jquery.com/b.js http://x.example/c"); e == "" {
+		t.Fatal("a non-https url in the list must be rejected")
 	}
 }
 

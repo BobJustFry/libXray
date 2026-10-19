@@ -26,7 +26,7 @@ import (
 // ядро впервые стало нашим: к 2026-09-07 указатели на ядро в приложении двигались
 // 45 раз (22 коммита Vupen поверх v26.7.28 + 12 в libXray), эта сборка — 46-я.
 // Правило — docs/VERSIONING.md, раздел «Ядро».
-const vupenCoreBuild = 84
+const vupenCoreBuild = 85
 
 // VupenCoreInfo — строка для лога NE при старте туннеля: BUILD ядра и фактический
 // потолок scratch-буфера отправки из НАШЕЙ копии x/net. Ссылка на
@@ -79,10 +79,12 @@ func VupenSetUplink(kind string, sig string) string {
 	return burst.VupenSetUplink(kind, sig)
 }
 
-// VupenSetCheckURL — файл проверки 24 КБ: основной и запасной (запасной — когда
-// основной ответил не 200; "" — без запасного). Только https. Зовёт платформа
-// при старте ядра; по умолчанию — Cloudflare 24 КБ. Возвращает "" или текст ошибки
-// (адреса тогда не меняются).
+// VupenSetCheckURL — файлы проверки 24 КБ: основной и запасной. Начиная с ядра 85
+// fallback может нести СПИСОК адресов через пробел: порядок [primary, fallback...]
+// и есть порядок проверки (запасной пробуется при HTTP ≠ 200 и при ошибке соединения
+// с хостом, не при остановке; все адреса не открылись одинаково — unknown). Только
+// https. Зовёт платформа при старте ядра; по умолчанию — jsDelivr, code.jquery.com,
+// Cloudflare 24 КБ. Возвращает "" или текст ошибки (адреса тогда не меняются).
 func VupenSetCheckURL(primary string, fallback string) string {
 	return burst.VupenSetCheckURL(primary, fallback)
 }
