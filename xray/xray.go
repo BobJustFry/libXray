@@ -97,6 +97,8 @@ func InitEnv(datDir string, mphCachePath string) {
 // configPath means the config.json file path.
 func RunXray(datDir string, mphCachePath string, configPath string) (err error) {
 	InitEnv(datDir, mphCachePath)
+	coreServerNow.Store(nil) // unpublish the old core first, then end a speedtest (CR-001)
+	speedtestCoreStopping()
 	memory.InitForceFree()
 	coreServer, err = StartXray(configPath)
 	if err != nil {
@@ -118,6 +120,8 @@ func RunXray(datDir string, mphCachePath string, configPath string) (err error) 
 // configJSON means the JSON configuration string.
 func RunXrayFromJSON(datDir string, mphCachePath string, configJSON string) (err error) {
 	InitEnv(datDir, mphCachePath)
+	coreServerNow.Store(nil) // unpublish the old core first, then end a speedtest (CR-001)
+	speedtestCoreStopping()
 	memory.InitForceFree()
 	coreServer, err = StartXrayFromJSON(configJSON)
 	coreServerNow.Store(coreServer)
@@ -136,9 +140,12 @@ func GetXrayState() bool {
 
 // Stop Xray instance.
 func StopXray() error {
+	// Unpublish the core first, then end a speedtest dialing through it (T-302, CR-001): a
+	// SpeedtestStart after this point sees no core, one before it is aborted.
+	coreServerNow.Store(nil)
+	speedtestCoreStopping()
 	memory.StopForceFree()
 	if coreServer != nil {
-		coreServerNow.Store(nil)
 		err := coreServer.Close()
 		coreServer = nil
 		grpctransport.ResetTransportPool()

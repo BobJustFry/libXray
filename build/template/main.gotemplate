@@ -194,3 +194,21 @@ func CGoVupenAutoState() *C.char {
 func CGoVupenCheckRoute(req *C.char) *C.char {
 	return C.CString(VupenCheckRoute(C.GoString(req)))
 }
+
+// Ядро 90: спидтест через живое ядро (контракт Android Lib v55, speedtest_vupen.go).
+// Все три вызова не блокируют (ядро читается атомарно) — можно звать из главного
+// изолята. Строки JSON как есть, возвращаемую освободить CGoFree.
+//export CGoSpeedtestStart
+func CGoSpeedtestStart(req *C.char) *C.char {
+	return C.CString(SpeedtestStart(C.GoString(req)))
+}
+
+//export CGoSpeedtestPoll
+func CGoSpeedtestPoll() *C.char {
+	return C.CString(SpeedtestPoll())
+}
+
+//export CGoSpeedtestCancel
+func CGoSpeedtestCancel() {
+	SpeedtestCancel()
+}
